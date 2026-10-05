@@ -1,5 +1,5 @@
 [project]
-name = "research-image-red-teaming"
+name = "rise"
 version = "0.1.0"
 description = "Evolutionary attack pipeline against text-to-image content moderation."
 readme = "README.md"

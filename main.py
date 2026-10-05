@@ -180,7 +180,7 @@ def _build_exploration_config(run_config) -> ExplorationConfig | None:
 
 def cli():
     load_dotenv()
-    parser = argparse.ArgumentParser(description="Research Image Red Teaming")
+    parser = argparse.ArgumentParser(description="RISE")
     parser.add_argument("--config", default="configs/run.example.yaml")
 
     sub = parser.add_subparsers(dest="command", required=True)
