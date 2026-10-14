@@ -11,7 +11,7 @@
   <a href="https://whitecircle.com/research/rise"><strong>Blog</strong></a> ·
   <a href="https://whitecircle.com/research/research/we-broke-frontier-image-models"><strong>Announcement</strong></a> ·
   <a href="https://arxiv.org/abs/2609.34920"><strong>arXiv</strong></a> ·
-  <img src="assets/neurips.svg" alt="NeurIPS 2026">
+  <strong>NeurIPS 2026</strong>
 </p>
 
 <br/>
