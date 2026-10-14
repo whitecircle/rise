@@ -89,6 +89,10 @@ def build_t2i(name: str, output_dir: Path | None = None):
         return FalFluxDevProvider(output_dir=output_dir)
     if name.startswith("fal-ai/"):
         return FalFluxDevProvider(model_id=name, output_dir=output_dir)
+    if name.startswith("fal:"):
+        # Any fal application id, including vendor namespaces such as
+        # fal:google/nano-banana-2.1 that do not start with "fal-ai/".
+        return FalFluxDevProvider(model_id=name.split(":", 1)[1], output_dir=output_dir)
     if name == "leonardo":
         return LeonardoProvider(output_dir=output_dir)
     if name.startswith("leonardo/"):
