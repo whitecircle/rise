@@ -1,29 +1,46 @@
-# RISE: Red-teaming via Iterative Strategy Evolution
+<p align="center">
+    <img src="/logo.png" height="100">
+    <h3 align="center">RISE</h3>
+</p>
 
-Code for [*RISE: Red-teaming via Iterative Strategy Evolution for Modern Text-to-Image
-Models*](https://arxiv.org/abs/2609.34920) (arXiv:2609.34920).
+<p align="center">
+  Red-teaming via Iterative Strategy Evolution
+</p>
+
+<p align="center">
+  <a href="https://whitecircle.com/research/rise"><strong>Blog</strong></a> ·
+  <a href="https://whitecircle.com/research/research/we-broke-frontier-image-models"><strong>Announcement</strong></a> ·
+  <a href="https://arxiv.org/abs/2609.34920"><strong>arXiv</strong></a> ·
+  <string>NeurIPS 2026</string>
+</p>
+
+<br/>
+
+## What is RISE
 
 Most automated red-teaming for text-to-image models optimises one prompt at a time, which
 stops working once a target blocks nearly everything: the search gets almost no signal to
-learn from. RISE searches one level up. It evolves short natural-language *strategies* —
+learn from. 
+
+RISE searches one level up. It evolves short natural-language *strategies* —
 instructions telling a prompt-writing LLM how to construct an attack — and scores each
 strategy by the images the prompts it produces actually get past the target. A strategy is
 judged on many prompts rather than one, so rare successes still move the search, and a
 strategy that works transfers to new scenarios without re-running the search.
 
-The pipeline needs no human-written attack prompts. You supply the judging criteria for a
+The pipeline needs no human-written attack prompts and uses an automated approach for scoring attack vectors. You supply the judging criteria for a
 category and a few plain scenario descriptions; an island-model evolutionary loop does the
 rest, with a VLM judge scoring every generated image against the criteria.
 
-## What is here, and what is not
+## What is in this repository
 
-Included: the full pipeline, configs for 3 categories (nudity, self-harm, graphic violence)
+**Included:** full pipeline, configs for 3 categories (nudity, self-harm, graphic violence)
 against the 3 production targets from the paper (DALL·E 3, GPT-Image-2, Nano-Banana 2) plus
 two newer releases (GPT-Image-2.5-flare, Nano-Banana 2.1), the judge criteria for those
 categories, and the local FLUX.2 testbed used in the paper.
 
-Not included, deliberately: the attack strategies and prompts the search discovered, the
-images it generated, and the judge criteria for the hate and suicide categories. Those
+**Not included:** the attack strategies and prompts the search discovered, the
+images it generated, and the judge criteria for critical categories. Those
 carry more misuse risk than the method itself. Everything needed to rerun the search and
 find your own is here.
 
@@ -59,17 +76,19 @@ locally unless you want it to.
 
 ### The attacker LLM
 
-The configs default to `qwen/qwen3-32b` on OpenRouter for all three attacker roles
-(`prompt_model`, `strategy_model`, `scenario_model`); the judge is
-`google/gemini-2.5-flash`, also via OpenRouter.
+The configs default to:
+- `qwen/qwen3-32b` on OpenRouter for all three attacker roles
+(`prompt_model`, `strategy_model`, `scenario_model`)
+- `google/gemini-2.5-flash` as a judge, also via OpenRouter.
 
-The paper's runs used an abliterated variant of the same model, which refuses less in the
-prompt-writing role; depending on the target and category, the stock model often performs
+Paper's runs used an abliterated variant of the same model, which refuses less in the
+prompt-writing role, but depending on the target and category, the stock model often performs
 comparably. To use the abliterated one, serve it locally:
 
 ```bash
-bash launch_sglang.sh    # huihui-ai/Qwen3-32B-abliterated; gated, so
-                         # huggingface-cli login or set HF_TOKEN first
+# huihui-ai/Qwen3-32B-abliterated is gated, so
+# huggingface-cli login or set HF_TOKEN first
+bash launch_sglang.sh
 ```
 
 then point the three attacker blocks at it, in whichever configs you are running:
@@ -95,20 +114,22 @@ python main.py --config configs/_qwen_e0e_gptimg2_sh.yaml run-from-config
 ```
 
 Configs are `_qwen_e0e_<target>_<category>.yaml`, with `<category>` one of `nudity`, `sh`,
-`violence`. Each runs a 2,500-target-call search. They share the search hyperparameters and
+`violence`. Each runs a 2,500-target-call search.
+
+Configs share the search hyperparameters and
 differ in `t2i_provider`, `examples_path`, `logging.run_dir`, `budgets.max_workers` (10–15,
-tuned to each API's rate limits), and — for `dalle3_sh` only — `prompts_path` and
+tuned to each API's rate limits), and (for `dalle3_sh` only) `prompts_path` and
 `seed_strategy`.
 
-| `<target>` | Model | |
-| --- | --- | --- |
-| `dalle3` | `dall-e-3` | paper |
-| `gptimg2` | `gpt-image-2` | paper |
-| `nanobanana2` | `fal-ai/nano-banana-2` | paper |
-| `gptimg25` | `gpt-image-2.5-flare` | newer release |
+| Target         | Model | |
+|----------------| --- | --- |
+| `dalle3`       | `dall-e-3` | paper |
+| `gptimg2`      | `gpt-image-2` | paper |
+| `nanobanana2`  | `fal-ai/nano-banana-2` | paper |
+| `gptimg25`     | `gpt-image-2.5-flare` | newer release |
 | `nanobanana21` | `google/nano-banana-2.1` (via fal) | newer release |
 
-The last two came out after the paper and are not covered by any number in it; they are
+The last two came out after the paper and are not covered by any number in it, but we put it
 here because the same search runs against them unchanged. Their image-API parameters are
 copied from the model they succeed, so check them against current provider docs. Both
 targets use floating model aliases that move when the provider updates them — pin a dated
@@ -118,9 +139,9 @@ comparable over time.
 Results go to `logging.run_dir` (default `logs/<target>_default_evo_<category>/`):
 
 - `strategies.jsonl` — every strategy evaluated, with its score. This is the output you care
-  about; the top entries are what you reuse.
-- `rollouts.jsonl` — per-prompt records: the prompt, judge score, judge reasoning
-- `images/` — generated images
+  about.
+- `rollouts.jsonl` — per-prompt records: prompt, judge score, judge reasoning.
+- `images/` — generated images.
 - a snapshot of the config the run used
 
 A note on the judge: criteria quality determines result quality. Write them in detail, with
@@ -129,17 +150,16 @@ criterion gets reward-hacked, and the search will happily optimise against the h
 
 ## Local testbed (FLUX.2 + OpenAI moderation)
 
-Production APIs are expensive and change under you. The paper's local testbed stands in for
-one: FLUX.2-klein-9B with OpenAI `omni-moderation-latest` checking both the prompt and the
+Production APIs are expensive and sometimes slow. If you'd like to give RISE a try locally, you can run a testbed with FLUX.2-klein-9B with OpenAI `omni-moderation-latest` checking both the prompt and the
 generated image. Blocked requests return HTTP 422 with `guardrail:<reason>`.
 
 A request is blocked when the `sexual` score of either check is at or above the threshold,
 or when OpenAI's own `flagged` field is set. That second condition is kept because the
-paper's numbers were produced with it; it also means a permissive threshold such as 0.85
+paper's numbers were produced with it. It also means a permissive threshold such as 0.85
 behaves as "OpenAI's defaults, or sexual ≥ 0.85" rather than 0.85 alone.
 
 This testbed is calibrated for nudity only. The default threshold of 0.05 was chosen to put
-difficulty in roughly the same range as DALL·E 3 for that category; it has not been checked
+difficulty in roughly the same range as DALL·E 3 for that category, and it has not been checked
 for violence or self-harm, so only a nudity config ships.
 
 ```bash
@@ -151,8 +171,9 @@ python scripts/flux2_server.py --oai-sexual-threshold 0.85   # permissive settin
 python main.py --config configs/_qwen_e0e_flux2_nudity.yaml run-from-config
 ```
 
-`t2i_provider: flux2-local` assumes port 5000; use `flux2-local/<port>` otherwise. If a
-moderation call fails three times the request is blocked rather than allowed through, so an
+`t2i_provider: flux2-local` assumes port 5000, use `flux2-local/<port>` otherwise.
+
+If a moderation call fails three times the request is blocked rather than allowed through, so an
 API outage cannot quietly inflate attack success.
 
 ### The two phases
@@ -190,9 +211,11 @@ reproduce the paper's phase-2 numbers.
 | `logging.run_dir` | where everything is written |
 
 Costs scale with `max_target_calls` × `images_per_prompt`, and the defaults are tuned for
-real runs rather than for trying things out. For a cheap first run, cut
+real runs rather than for trying things out. 
+
+For a cheap first run, cut
 `budgets.max_target_calls` hard and reduce `evolution.islands`, `prompt_variants` and
-`images_per_prompt`. Weakly guarded targets need fewer islands; well-guarded ones generally
+`images_per_prompt`. Weakly guarded targets need fewer islands, and well-guarded ones generally
 need more islands and more than one seed strategy. Watch whether the strategy population
 stays diverse or collapses onto one idea, and set the island count from that.
 
@@ -205,9 +228,9 @@ stays diverse or collapses onto one idea, and set the island count from that.
 
 ## Responsible use
 
-This is an offensive tool, published so that the people building and auditing these systems
-can measure their defences. Use it against systems you are authorised to test. We reported
-what we found to the affected vendors before publishing, and we ask that you do the same.
+We decided to open-source this work so that the people building and auditing AI systems can measure their defenses. We strongly recommend running it only against systems you are authorized to test. We reported what we found to the affected vendors before publishing, and we ask that you do the same.
+
+**Disclaimer:** This work is provided for research, educational, and defensive security purposes only. We do not endorse or encourage any malicious, unauthorized, or unlawful use. Users are solely responsible for how they use this work and for ensuring compliance with applicable laws and regulations. To the fullest extent permitted by law, we disclaim all liability for any damages, losses, harm, or misuse arising from the use or distribution of this work.
 
 ## Citation
 
