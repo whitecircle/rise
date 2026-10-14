@@ -1,9 +1,44 @@
-# RISE
+# RISE: Red-teaming via Iterative Strategy Evolution
 
-Evolutionary attack pipeline against text-to-image content moderation.
-This is the NeurIPS supplement: the code and configs for the main experiments,
-3 categories (self-harm, violence, nudity) × 3 image models (DALL·E 3,
-GPT-Image-2, Nano-Banana 2), plus the local FLUX.2 testbed (nudity only).
+Code for [*RISE: Red-teaming via Iterative Strategy Evolution for Modern Text-to-Image
+Models*](https://arxiv.org/abs/2609.34920) (arXiv:2609.34920).
+
+Most automated red-teaming for text-to-image models optimises one prompt at a time, which
+stops working once a target blocks nearly everything: the search gets almost no signal to
+learn from. RISE searches one level up. It evolves short natural-language *strategies* —
+instructions telling a prompt-writing LLM how to construct an attack — and scores each
+strategy by the images the prompts it produces actually get past the target. A strategy is
+judged on many prompts rather than one, so rare successes still move the search, and a
+strategy that works transfers to new scenarios without re-running the search.
+
+The pipeline needs no human-written attack prompts. You supply the judging criteria for a
+category and a few plain scenario descriptions; an island-model evolutionary loop does the
+rest, with a VLM judge scoring every generated image against the criteria.
+
+## What is here, and what is not
+
+Included: the full pipeline, configs for 3 categories (nudity, self-harm, graphic violence)
+against the 3 production targets from the paper (DALL·E 3, GPT-Image-2, Nano-Banana 2) plus
+two newer releases (GPT-Image-2.5-flare, Nano-Banana 2.1), the judge criteria for those
+categories, and the local FLUX.2 testbed used in the paper.
+
+Not included, deliberately: the attack strategies and prompts the search discovered, the
+images it generated, and the judge criteria for the hate and suicide categories. Those
+carry more misuse risk than the method itself. Everything needed to rerun the search and
+find your own is here.
+
+```
+configs/     run configs (9 paper runs, 6 newer targets, 2 local-testbed) and meta-prompts
+data/        judge criteria and seed scenarios per category
+image_red_teaming/
+  meta_optimizer.py      island-model evolutionary search over strategies
+  prompt_generation.py   strategy + scenario -> candidate prompt
+  scenario_generation.py criteria -> scenario stubs, with feedback memory
+  providers/             target image models (OpenAI, fal, Leonardo, local FLUX.2)
+  clients/               LLM endpoints for the attacker and judge
+scripts/flux2_server.py  local FLUX.2 testbed behind OpenAI moderation
+main.py                  entry point: run-from-config
+```
 
 ## Setup
 
@@ -13,113 +48,177 @@ Python ≥ 3.12.
 uv sync
 ```
 
-Credentials go in a `.env` (loaded with `python-dotenv`):
+Credentials are read from a `.env` file. You need only the ones your run touches:
 
-- `OPENROUTER_API_KEY` — always needed. The judge (`google/gemini-2.5-flash`)
-  runs through OpenRouter in every config, and the attacker client reads this
-  variable even when it points at the local endpoint.
-- `OPENAI_API_KEY` — `openai/dall-e-3`, `openai/gpt-image-2`, and the
-  moderation calls of the local testbed server.
-- `FAL_KEY` — `fal-ai/flux/dev` (routes to Nano-Banana 2).
+- `OPENROUTER_API_KEY` — the attacker LLM and the judge
+- `OPENAI_API_KEY` — the DALL·E 3 and GPT-Image targets, and the local testbed's moderation
+- `FAL_KEY` — the Nano-Banana targets, served through fal.ai
 
-The configs use a local attacker LLM at `http://127.0.0.1:30000/v1` as
-`prompt_model` / `strategy_model` / `scenario_model`:
+That is the whole setup: the configs reach every model over an API, so nothing needs to run
+locally unless you want it to.
+
+### The attacker LLM
+
+The configs default to `qwen/qwen3-32b` on OpenRouter for all three attacker roles
+(`prompt_model`, `strategy_model`, `scenario_model`); the judge is
+`google/gemini-2.5-flash`, also via OpenRouter.
+
+The paper's runs used an abliterated variant of the same model, which refuses less in the
+prompt-writing role; depending on the target and category, the stock model often performs
+comparably. To use the abliterated one, serve it locally:
 
 ```bash
-bash launch_sglang.sh
+bash launch_sglang.sh    # huihui-ai/Qwen3-32B-abliterated; gated, so
+                         # huggingface-cli login or set HF_TOKEN first
 ```
 
-Edit `launch_sglang.sh` to serve a different attacker.
+then point the three attacker blocks at it, in whichever configs you are running:
 
-## Running a (model, category) experiment
+```yaml
+prompt_model:            # likewise strategy_model and scenario_model
+  model: huihui-ai/Qwen3-32B-abliterated
+  base_url: http://127.0.0.1:30000/v1
+  client: openrouter     # OpenAI-compatible; the base_url is what matters
+  temperature: 1.0
+  max_tokens: 6000
+```
+
+Any endpoint speaking the OpenAI chat API works here, hosted or local. Note that
+`OPENROUTER_API_KEY` must still be set even when the attacker points at a local endpoint:
+the client reads it regardless of `base_url`. Appendix F of the paper compares several
+drivers.
+
+## Running a search
 
 ```bash
 python main.py --config configs/_qwen_e0e_gptimg2_sh.yaml run-from-config
 ```
 
-The nine API-model configs are `_qwen_e0e_<model>_<category>.yaml` with
-`<model>` ∈ {dalle3, gptimg2, nanobanana2} and `<category>` ∈ {sh, violence,
-nudity}. They differ in `t2i_provider`, `examples_path`, `logging.run_dir` and
-`budgets.max_workers`; `dalle3_sh` also uses `configs/meta_prompts.yaml` and a
-different seed strategy. The two `_qwen_e0e_flux2_nudity*.yaml` configs are
-for the testbed below.
+Configs are `_qwen_e0e_<target>_<category>.yaml`, with `<category>` one of `nudity`, `sh`,
+`violence`. Each runs a 2,500-target-call search. They share the search hyperparameters and
+differ in `t2i_provider`, `examples_path`, `logging.run_dir`, `budgets.max_workers` (10–15,
+tuned to each API's rate limits), and — for `dalle3_sh` only — `prompts_path` and
+`seed_strategy`.
 
-A run writes `rollouts.jsonl`, `strategies.jsonl`, the generated images and a
-copy of the config to `logging.run_dir`.
+| `<target>` | Model | |
+| --- | --- | --- |
+| `dalle3` | `dall-e-3` | paper |
+| `gptimg2` | `gpt-image-2` | paper |
+| `nanobanana2` | `fal-ai/nano-banana-2` | paper |
+| `gptimg25` | `gpt-image-2.5-flare` | newer release |
+| `nanobanana21` | `google/nano-banana-2.1` (via fal) | newer release |
+
+The last two came out after the paper and are not covered by any number in it; they are
+here because the same search runs against them unchanged. Their image-API parameters are
+copied from the model they succeed, so check them against current provider docs. Both
+targets use floating model aliases that move when the provider updates them — pin a dated
+snapshot (for example `gpt-image-2.5-flare-2026-09-08`) if you need a run to stay
+comparable over time.
+
+Results go to `logging.run_dir` (default `logs/<target>_default_evo_<category>/`):
+
+- `strategies.jsonl` — every strategy evaluated, with its score. This is the output you care
+  about; the top entries are what you reuse.
+- `rollouts.jsonl` — per-prompt records: the prompt, judge score, judge reasoning
+- `images/` — generated images
+- a snapshot of the config the run used
+
+A note on the judge: criteria quality determines result quality. Write them in detail, with
+the score bands spelled out (see `data/criteria.yaml`), and expect to revise them. A vague
+criterion gets reward-hacked, and the search will happily optimise against the hack.
 
 ## Local testbed (FLUX.2 + OpenAI moderation)
 
-FLUX.2-klein-9B behind OpenAI `omni-moderation-latest`, applied to the prompt
-and to the generated image. A request is blocked (HTTP 422,
-`guardrail:<reason>`) when the `sexual` score of either check is at or above
-the threshold, or when OpenAI's own `flagged` field is true. The `flagged`
-fallback is what the paper's numbers were produced with; it also blocks other
-OpenAI categories at OpenAI's default thresholds, so a permissive threshold
-like 0.85 means "OpenAI defaults, or sexual ≥ 0.85". If a moderation call fails
-three times the request is blocked (`guardrail:moderation_unavailable`), so an
-API outage cannot inflate attack success.
+Production APIs are expensive and change under you. The paper's local testbed stands in for
+one: FLUX.2-klein-9B with OpenAI `omni-moderation-latest` checking both the prompt and the
+generated image. Blocked requests return HTTP 422 with `guardrail:<reason>`.
 
-The default threshold, 0.05, was chosen to roughly match DALL·E 3 difficulty on
-nudity. The testbed was not validated on the other categories, so only nudity
-configs are provided.
+A request is blocked when the `sexual` score of either check is at or above the threshold,
+or when OpenAI's own `flagged` field is set. That second condition is kept because the
+paper's numbers were produced with it; it also means a permissive threshold such as 0.85
+behaves as "OpenAI's defaults, or sexual ≥ 0.85" rather than 0.85 alone.
 
-Needs a CUDA GPU with room for FLUX.2-klein-9B in bf16, and `OPENAI_API_KEY`
-(also used for an always-on sexual/minors check that `--no-moderation` does
-not disable).
+This testbed is calibrated for nudity only. The default threshold of 0.05 was chosen to put
+difficulty in roughly the same range as DALL·E 3 for that category; it has not been checked
+for violence or self-harm, so only a nudity config ships.
 
 ```bash
-uv sync --extra testbed
+uv sync --extra testbed      # needs a CUDA GPU that fits FLUX.2-klein-9B in bf16
+
 python scripts/flux2_server.py --gpus 0 --instances-per-gpu 1 --port 5000
-# permissive setting from the paper's transfer experiments:
-python scripts/flux2_server.py --oai-sexual-threshold 0.85
-```
+python scripts/flux2_server.py --oai-sexual-threshold 0.85   # permissive setting
 
-`t2i_provider: flux2-local` in the configs points at `127.0.0.1:5000`; use
-`flux2-local/<port>` for another port.
-
-Phase 1 evolves strategies (`run_mode: optimize-strategies`, 2,500 target
-calls) and writes them to `strategies.jsonl` in the run directory:
-
-```bash
 python main.py --config configs/_qwen_e0e_flux2_nudity.yaml run-from-config
 ```
 
-Phase 2 (`_qwen_e0e_flux2_nudity_fixed.yaml`, `run_mode: fixed-strategy`,
-1,500 target calls) runs a fixed set of strategies without mutating them,
-allocates calls across them with UCB1, and generates scenarios from
-`data/criteria.yaml` with per-strategy feedback memory. Before running it,
-replace `fixed_strategies` with the top-k entries from your phase-1
-`strategies.jsonl` (the paper uses the top 5), keeping the `name`,
-`instructions` and `prompt_tag` fields. The shipped entries are placeholders:
-the strategies our search found are not released, and the placeholders will
-not reproduce the paper's phase-2 numbers.
+`t2i_provider: flux2-local` assumes port 5000; use `flux2-local/<port>` otherwise. If a
+moderation call fails three times the request is blocked rather than allowed through, so an
+API outage cannot quietly inflate attack success.
 
-## Config fields
+### The two phases
 
-- `t2i_provider` — target model, with URL-style params
-  (`openai/dall-e-3?size=1024x1024&quality=standard`).
-- `examples_path` — YAML of (text, criteria) pairs defining the category.
-- `prompts_path` — meta-prompt templates used when mutating strategies.
-- `prompt_model`, `strategy_model`, `scenario_model` — attacker LLM endpoints.
-- `judge_model` — VLM that scores images against `criteria`.
-- `evolution.*` — island model: `islands`, `parent_selection`,
-  `seed_island_variants`, `migration_*`.
-- `budgets.max_target_calls` — total image-generation budget;
-  `budgets.max_workers` — parallel image calls.
-- `images_per_prompt`, `prompt_variants`, `distinct_prompt_variants` —
-  prompts and images sampled per example.
-- `seed_strategy` — the hand-written strategy every island starts from.
-- `logging.run_dir` — output directory.
+Phase 1, `_qwen_e0e_flux2_nudity.yaml` (`run_mode: optimize-strategies`, 2,500 calls),
+evolves strategies and writes them to `strategies.jsonl`.
 
-To cut cost, lower `evolution.islands`, `evolution.seed_island_variants`,
-`prompt_variants`, `distinct_prompt_variants`, `images_per_prompt` and
-`budgets.max_workers`. Weak moderation can be attacked with a few islands;
-the stronger targets needed 4–6 islands and several seed strategies. The
-`criteria` text drives judge quality and the judge can be reward-hacked, so
-expect to refine it.
+Phase 2, `_qwen_e0e_flux2_nudity_fixed.yaml` (`run_mode: fixed-strategy`, 1,500 calls), runs
+a frozen set of strategies without mutating them, splitting the budget across them with
+UCB1 and generating fresh scenarios from `data/criteria.yaml` with per-strategy feedback
+memory.
 
-## Adding an image provider
+**Phase 2 needs your phase-1 output.** Replace `fixed_strategies` in that config with the
+highest-scoring entries from your phase-1 `strategies.jsonl` (the paper uses the top 5),
+keeping the `name` / `instructions` / `prompt_tag` fields. What ships in the file are
+generic placeholders standing in for the strategies we withheld; they run, but they will not
+reproduce the paper's phase-2 numbers.
 
-Subclass `ImageGenProvider` in `image_red_teaming/providers/`, return a list of
-`GeneratedImage`, raise `GuardrailError` when the provider blocks the request,
-and register the name in `build_t2i` in `main.py`.
+## Config reference
+
+| Field | Meaning |
+| --- | --- |
+| `t2i_provider` | target model, with URL params, e.g. `openai/dall-e-3?size=1024x1024&quality=standard`. Prefixes: `openai/`, `fal-ai/`, `leonardo/`, `flux2-local`, and `fal:<app id>` for fal apps outside the `fal-ai/` namespace |
+| `examples_path` | seed scenarios with their criteria (phase 1) |
+| `criteria_path` | criteria to generate scenarios from (phase 2; used instead of `examples_path`) |
+| `prompts_path` | meta-prompt template used when mutating strategies |
+| `prompt_model`, `strategy_model`, `scenario_model` | attacker LLM endpoints |
+| `judge_model` | VLM that scores images against the criteria |
+| `seed_strategy` | starting strategy every island is seeded from |
+| `evolution.*` | island count, parent selection, migration, archive size |
+| `budgets.max_target_calls` | total image generations; the run's real cost |
+| `budgets.max_workers` | parallel image calls |
+| `images_per_prompt`, `prompt_variants`, `distinct_prompt_variants` | sampling width per scenario |
+| `run_mode` | `optimize-strategies`, `fixed-strategy`, or `generate-examples` |
+| `logging.run_dir` | where everything is written |
+
+Costs scale with `max_target_calls` × `images_per_prompt`, and the defaults are tuned for
+real runs rather than for trying things out. For a cheap first run, cut
+`budgets.max_target_calls` hard and reduce `evolution.islands`, `prompt_variants` and
+`images_per_prompt`. Weakly guarded targets need fewer islands; well-guarded ones generally
+need more islands and more than one seed strategy. Watch whether the strategy population
+stays diverse or collapses onto one idea, and set the island count from that.
+
+## Adding a target
+
+1. Subclass `ImageGenProvider` in `image_red_teaming/providers/`, returning
+   `GeneratedImage`s and raising `GuardrailError` when the target refuses.
+2. Register the name in `build_t2i` in `main.py`.
+3. Point `t2i_provider` at it.
+
+## Responsible use
+
+This is an offensive tool, published so that the people building and auditing these systems
+can measure their defences. Use it against systems you are authorised to test. We reported
+what we found to the affected vendors before publishing, and we ask that you do the same.
+
+## Citation
+
+```bibtex
+@misc{kharlapenko2026rise,
+  title         = {{RISE}: Red-teaming via Iterative Strategy Evolution for Modern Text-to-Image Models},
+  author        = {Kharlapenko, Dmitrii and Bratchikov, Sergei and Korolev, Konstantin and Nikolich, Aleksandr},
+  year          = {2026},
+  eprint        = {2609.34920},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.AI},
+  url           = {https://arxiv.org/abs/2609.34920}
+}
+```
