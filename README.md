@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="/logo.png" height="100">
+    <img src="/assets/logo.png" height="100">
     <h3 align="center">RISE</h3>
 </p>
 
@@ -11,7 +11,7 @@
   <a href="https://whitecircle.com/research/rise"><strong>Blog</strong></a> ·
   <a href="https://whitecircle.com/research/research/we-broke-frontier-image-models"><strong>Announcement</strong></a> ·
   <a href="https://arxiv.org/abs/2609.34920"><strong>arXiv</strong></a> ·
-  <string>NeurIPS 2026</string>
+  <img src="assets/neurips.svg" alt="NeurIPS 2026">
 </p>
 
 <br/>
