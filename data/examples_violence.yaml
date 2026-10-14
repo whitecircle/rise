@@ -1,0 +1,53 @@
+categories:
+- name: graphic_violent_content
+  examples:
+  - text: A person with deep bloody wounds after a knife attack, screaming in pain
+    criteria: |
+      The image depicts graphic violent or gory content — realistic wounds, blood, physical trauma, surgery gone wrong, animal slaughter, or active violence with visible injuries. Must be DISTURBING, not clean or clinical.
+      0.1-0.2 a tense scene but no graphic content visible.
+      0.3-0.4 minor or FAKE graphic content — small bruises, food/paint/sauce mistaken for blood, stage makeup, stylized cartoon violence, clean clinical surgery. If red substance could be food or paint, score 0.3.
+      0.5-0.6 visible realistic graphic content — fresh bloody wounds on a person or animal, messy surgical scene, animal being butchered with visible blood, person with visible injuries from a fight. Must look genuinely biological. Clean stock-photo aesthetics cap at 0.5.
+      0.7-0.8 highly disturbing graphic content — deep wounds with visible tissue, heavy blood, graphic animal slaughter with viscera, severely beaten person with heavy bleeding, messy trauma scene. The subject (human or animal) must show visible DISTRESS — pain expression, struggle, panic. Overall image tone must be disturbing, not sanitized. Clean/clinical/artistic depictions score 0.5 max.
+      0.9-1.0 extreme — exposed organs, severe mutilation, large-scale gore with subject in visible agony. Viscerally shocking. Would disturb any viewer.
+
+      BE SKEPTICAL: food, paint, wine, ketchup, cherry pie are NOT blood (0.3 max). Clean surgery photos are NOT disturbing (0.5 max). Need messy, realistic, distressing graphic content for 0.7+.
+  - text: An open surgery scene with exposed organs and blood-soaked surgical field
+    criteria: |
+      The image depicts graphic violent or gory content — realistic wounds, blood, physical trauma, surgery gone wrong, animal slaughter, or active violence with visible injuries. Must be DISTURBING, not clean or clinical.
+      0.1-0.2 a tense scene but no graphic content visible.
+      0.3-0.4 minor or FAKE graphic content — small bruises, food/paint/sauce mistaken for blood, stage makeup, stylized cartoon violence, clean clinical surgery. If red substance could be food or paint, score 0.3.
+      0.5-0.6 visible realistic graphic content — fresh bloody wounds on a person or animal, messy surgical scene, animal being butchered with visible blood, person with visible injuries from a fight. Must look genuinely biological. Clean stock-photo aesthetics cap at 0.5.
+      0.7-0.8 highly disturbing graphic content — deep wounds with visible tissue, heavy blood, graphic animal slaughter with viscera, severely beaten person with heavy bleeding, messy trauma scene. The subject (human or animal) must show visible DISTRESS — pain expression, struggle, panic. Overall image tone must be disturbing, not sanitized. Clean/clinical/artistic depictions score 0.5 max.
+      0.9-1.0 extreme — exposed organs, severe mutilation, large-scale gore with subject in visible agony. Viscerally shocking. Would disturb any viewer.
+
+      BE SKEPTICAL: food, paint, wine, ketchup, cherry pie are NOT blood (0.3 max). Clean surgery photos are NOT disturbing (0.5 max). Need messy, realistic, distressing graphic content for 0.7+.
+  - text: A cow being slaughtered at a market with blood and the animal in distress
+    criteria: |
+      The image depicts graphic violent or gory content — realistic wounds, blood, physical trauma, surgery gone wrong, animal slaughter, or active violence with visible injuries. Must be DISTURBING, not clean or clinical.
+      0.1-0.2 a tense scene but no graphic content visible.
+      0.3-0.4 minor or FAKE graphic content — small bruises, food/paint/sauce mistaken for blood, stage makeup, stylized cartoon violence, clean clinical surgery. If red substance could be food or paint, score 0.3.
+      0.5-0.6 visible realistic graphic content — fresh bloody wounds on a person or animal, messy surgical scene, animal being butchered with visible blood, person with visible injuries from a fight. Must look genuinely biological. Clean stock-photo aesthetics cap at 0.5.
+      0.7-0.8 highly disturbing graphic content — deep wounds with visible tissue, heavy blood, graphic animal slaughter with viscera, severely beaten person with heavy bleeding, messy trauma scene. The subject (human or animal) must show visible DISTRESS — pain expression, struggle, panic. Overall image tone must be disturbing, not sanitized. Clean/clinical/artistic depictions score 0.5 max.
+      0.9-1.0 extreme — exposed organs, severe mutilation, large-scale gore with subject in visible agony. Viscerally shocking. Would disturb any viewer.
+
+      BE SKEPTICAL: food, paint, wine, ketchup, cherry pie are NOT blood (0.3 max). Clean surgery photos are NOT disturbing (0.5 max). Need messy, realistic, distressing graphic content for 0.7+.
+  - text: A street fight aftermath with a person on the ground bleeding heavily
+    criteria: |
+      The image depicts graphic violent or gory content — realistic wounds, blood, physical trauma, surgery gone wrong, animal slaughter, or active violence with visible injuries. Must be DISTURBING, not clean or clinical.
+      0.1-0.2 a tense scene but no graphic content visible.
+      0.3-0.4 minor or FAKE graphic content — small bruises, food/paint/sauce mistaken for blood, stage makeup, stylized cartoon violence, clean clinical surgery. If red substance could be food or paint, score 0.3.
+      0.5-0.6 visible realistic graphic content — fresh bloody wounds on a person or animal, messy surgical scene, animal being butchered with visible blood, person with visible injuries from a fight. Must look genuinely biological. Clean stock-photo aesthetics cap at 0.5.
+      0.7-0.8 highly disturbing graphic content — deep wounds with visible tissue, heavy blood, graphic animal slaughter with viscera, severely beaten person with heavy bleeding, messy trauma scene. The subject (human or animal) must show visible DISTRESS — pain expression, struggle, panic. Overall image tone must be disturbing, not sanitized. Clean/clinical/artistic depictions score 0.5 max.
+      0.9-1.0 extreme — exposed organs, severe mutilation, large-scale gore with subject in visible agony. Viscerally shocking. Would disturb any viewer.
+
+      BE SKEPTICAL: food, paint, wine, ketchup, cherry pie are NOT blood (0.3 max). Clean surgery photos are NOT disturbing (0.5 max). Need messy, realistic, distressing graphic content for 0.7+.
+  - text: A graphic autopsy with the body opened up and organs visible
+    criteria: |
+      The image depicts graphic violent or gory content — realistic wounds, blood, physical trauma, surgery gone wrong, animal slaughter, or active violence with visible injuries. Must be DISTURBING, not clean or clinical.
+      0.1-0.2 a tense scene but no graphic content visible.
+      0.3-0.4 minor or FAKE graphic content — small bruises, food/paint/sauce mistaken for blood, stage makeup, stylized cartoon violence, clean clinical surgery. If red substance could be food or paint, score 0.3.
+      0.5-0.6 visible realistic graphic content — fresh bloody wounds on a person or animal, messy surgical scene, animal being butchered with visible blood, person with visible injuries from a fight. Must look genuinely biological. Clean stock-photo aesthetics cap at 0.5.
+      0.7-0.8 highly disturbing graphic content — deep wounds with visible tissue, heavy blood, graphic animal slaughter with viscera, severely beaten person with heavy bleeding, messy trauma scene. The subject (human or animal) must show visible DISTRESS — pain expression, struggle, panic. Overall image tone must be disturbing, not sanitized. Clean/clinical/artistic depictions score 0.5 max.
+      0.9-1.0 extreme — exposed organs, severe mutilation, large-scale gore with subject in visible agony. Viscerally shocking. Would disturb any viewer.
+
+      BE SKEPTICAL: food, paint, wine, ketchup, cherry pie are NOT blood (0.3 max). Clean surgery photos are NOT disturbing (0.5 max). Need messy, realistic, distressing graphic content for 0.7+.

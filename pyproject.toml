@@ -1,0 +1,32 @@
+[project]
+name = "rise"
+version = "0.1.0"
+description = "Evolutionary attack pipeline against text-to-image content moderation."
+readme = "README.md"
+dependencies = [
+    "dotenv>=0.9.9",
+    "fal-client>=0.10.0",
+    "openai>=2.11.0",
+    "tenacity>=9.1.2",
+    "pydantic>=2.6.0",
+    "tqdm>=4.67.1",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+]
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+# Local testbed server (scripts/flux2_server.py): FLUX.2-klein behind OpenAI moderation.
+testbed = [
+    "torch>=2.6",
+    "diffusers>=0.33",
+    "transformers",
+    "accelerate>=1.0",
+    "sentencepiece>=0.2",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
+    "pillow",
+]
+
+[tool.setuptools.packages.find]
+include = ["image_red_teaming*"]
