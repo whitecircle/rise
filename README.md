@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="/assets/logo.png" height="100">
+    <img src="/assets/logo.jpg" height="100">
     <h3 align="center">RISE</h3>
 </p>
 
@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://whitecircle.com/research/rise"><strong>Blog</strong></a> ·
-  <a href="https://whitecircle.com/research/research/we-broke-frontier-image-models"><strong>Announcement</strong></a> ·
+  <a href="https://whitecircle.com/research/we-broke-frontier-image-models"><strong>Announcement</strong></a> ·
   <a href="https://arxiv.org/abs/2609.34920"><strong>arXiv</strong></a> ·
   <strong>NeurIPS 2026</strong>
 </p>
