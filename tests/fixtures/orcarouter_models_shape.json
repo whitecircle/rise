@@ -1,0 +1,886 @@
+{
+ "data": [
+  {
+   "id": "vendor0/model-0",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor1/model-1",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor2/model-2",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor3/model-3",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor4/model-4",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor5/model-5",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor6/model-6",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor0/model-7",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor1/model-8",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor2/model-9",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor3/model-10",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor4/model-11",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor5/model-12",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor6/model-13",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor0/model-14",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor1/model-15",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor2/model-16",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor3/model-17",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor4/model-18",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor5/model-19",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor6/model-20",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor0/model-21",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor1/model-22",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor2/model-23",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor3/model-24",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor4/model-25",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor5/model-26",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor6/model-27",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor0/model-28",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor1/model-29",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor2/model-30",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor3/model-31",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor4/model-32",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor5/model-33",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor6/model-34",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor0/model-35",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor1/model-36",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor2/model-37",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor3/model-38",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor4/model-39",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor5/model-40",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  },
+  {
+   "id": "vendor6/model-41",
+   "object": "model",
+   "created": 0,
+   "owned_by": "v",
+   "supported_endpoint_types": [
+    "openai"
+   ],
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000002"
+   }
+  }
+ ]
+}

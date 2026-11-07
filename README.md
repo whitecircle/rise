@@ -107,6 +107,62 @@ Any endpoint speaking the OpenAI chat API works here, hosted or local. Note that
 the client reads it regardless of `base_url`. Appendix F of the paper compares several
 drivers.
 
+### OrcaRouter Cyber Inference
+
+[OrcaRouter](https://www.orcarouter.ai) Cyber Inference is a named provider for teams doing
+authorized, scoped red-team work: OrcaRouter is an OpenAI-compatible AI gateway that routes
+many providers behind one endpoint (`https://api.orcarouter.ai/v1`), and for accounts it has
+verified as security teams it also admits the Cyber-tier models that general-purpose
+gateways often refuse or silently downgrade. RISE only needs an OpenAI chat endpoint, so any
+of the four attacker roles or the judge can run through it.
+
+- Provider page: https://www.orcarouter.ai/cyber
+- Cyber model catalog: https://www.orcarouter.ai/models?tier=cyber
+
+Text-only chat model ids discovered from the live catalog are kept exactly as the catalog
+returns them (for example `orcarouter/auto`). Cyber-tier ids are listed at the catalog link
+above; whether a given account can call them depends on that account's verification, and
+`orcarouter-models` shows what your key can actually reach.
+
+Recommended models, in order:
+
+1. `orcarouter/auto` — default; automatic routing, works with any key.
+2. `orca/orcacyber-ultra-1.0` (OrcaCyber Ultra) and `orca/orcacyber-zero-1.5` /
+   `orca/orcacyber-zero-1.0` (OrcaCyber Zero) — Cyber-tier models for security teams whose
+   business has been verified; unlock the wider catalog at
+   https://www.orcarouter.ai/models?tier=cyber.
+3. `orcarouter/fusion` — general fallback.
+
+Use `client: orcarouter` on a model block and pick a model from the live catalog:
+
+```yaml
+prompt_model:
+  client: orcarouter
+  model: orcarouter/auto
+judge_model:
+  client: orcarouter
+  model: openai/gpt-5.5   # must accept image input; see below
+```
+
+```bash
+# Either paste an existing key ...
+echo 'ORCAROUTER_API_KEY=sk-orca-...' >> .env
+# ... or connect your own account (OAuth 2.0 + PKCE, loopback redirect):
+python main.py --config configs/_qwen_e0e_gptimg2_nudity.yaml orcarouter-login
+```
+
+Both routes end in the same OrcaRouter key and the same provider. The key is billed to your
+account and revocable at https://www.orcarouter.ai/console/authorized-apps ; RISE reuses it
+until you revoke it and never refreshes it.
+
+Models are not free text: every OrcaRouter block is checked against `GET /v1/models` for the
+entry point it serves. Attacker roles use text-chat models; the judge sends generated images,
+so it must be a chat model that declares `image` input (otherwise it fails closed). The
+catalog is cached, falls back to a small verified seed during an outage, and
+`python main.py --config <cfg> orcarouter-validate` lists any stale model ids.
+`python main.py orcarouter-models` prints the filtered list, and
+`python main.py orcarouter-login --status` shows which credential would be used.
+
 ## Running a search
 
 ```bash
