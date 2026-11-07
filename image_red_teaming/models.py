@@ -222,7 +222,15 @@ class ModelConfig(BaseModel):
     model: str
     base_url: Optional[str] = None
     api_key_env: str = "OPENROUTER_API_KEY"
-    client: str = "openrouter"  # openrouter | httpx
+    client: str = "openrouter"  # openrouter | httpx | orcarouter
+    # OrcaRouter only: entry-point capability used to filter the live model
+    # catalog ("text" for attacker roles, "vlm" for the judge), and an optional
+    # replacement used when `model` is no longer offered for that capability.
+    capability: Optional[str] = None
+    # Set from the RunConfig field name by load_run_config; lets the provider
+    # apply role-specific capability rules (the judge always needs "vlm").
+    role: Optional[str] = None
+    model_override: Optional[str] = None
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     system_prompt: Optional[str] = None

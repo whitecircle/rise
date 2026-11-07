@@ -46,7 +46,15 @@ def load_meta_prompts(path: Path) -> MetaPromptTemplates:
 
 def load_run_config(path: Path) -> RunConfig:
     data = load_yaml(path)
-    return RunConfig.model_validate(data)
+    config = RunConfig.model_validate(data)
+    # Record which entry point each model block fills; the OrcaRouter provider
+    # needs it to demand image input for the judge.
+    for field_name in ("strategy_model", "prompt_model", "scenario_model", "example_model", "judge_model"):
+        models = getattr(config, field_name, None)
+        for model in models if isinstance(models, list) else [models]:
+            if model is not None and getattr(model, "role", None) is None:
+                model.role = field_name
+    return config
 
 
 def load_technique_library(path: Path) -> list[TechniqueEntry]:

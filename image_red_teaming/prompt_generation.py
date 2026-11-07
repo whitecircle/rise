@@ -299,10 +299,14 @@ class JudgeScorer:
         llm: LLMClient,
         model_config: ModelConfig,
         judge_template: str,
+        capability: Optional[str] = None,
     ) -> None:
         self.llm = llm
         self.model_config = model_config
         self.judge_template = judge_template
+        # The judge sends generated images; for OrcaRouter the model must be
+        # one the live catalog advertises with image input ("vlm" capability).
+        self.capability = capability
 
     def score(
         self,

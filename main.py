@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from image_red_teaming.clients.openrouter import OpenRouterClient
 from image_red_teaming.clients.http_llm import HttpLLMClient
+from image_red_teaming.clients.orcarouter import OrcaRouterCyberClient, build_orcarouter_client
 from image_red_teaming.config_loader import (
     load_categories,
     load_criteria,
     load_meta_prompts,
-    load_run_config,
     load_technique_library,
 )
 from image_red_teaming.example_generation import generate_examples
@@ -29,9 +31,36 @@ from image_red_teaming.exploration import ExplorationConfig, PERTURBATION_METHOD
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_CONFIG_PATH = "configs/_qwen_e0e_gptimg2_nudity.yaml"
+
+
+def _load_run_config(path):
+    """``config_loader.load_run_config``, looked up at call time so it stays patchable."""
+    from image_red_teaming import config_loader
+
+    return config_loader.load_run_config(path)
+
+
+def _stored_or_browser_source():
+    """Existing stored login where it applies, else a source that starts browser login."""
+    from image_red_teaming.clients import orcarouter as orca
+
+    credential = orca.get_stored_credential(orca.resolve_api_base())
+    if credential is None:
+        credential = orca.PkceKeySource().acquire()
+    return credential
+
+
+def _judge_capability(model_config):
+    """The judge sends images, so OrcaRouter judges must be VLM-capable models."""
+    return "vlm" if getattr(model_config, "client", None) == "orcarouter" else None
+
+
 def build_llm(model_config, headers=None):
     if model_config.client == "httpx":
         client = HttpLLMClient(config=model_config)
+    elif model_config.client == "orcarouter":
+        client = build_orcarouter_client(model_config, headers=headers)
     else:
         client = OpenRouterClient(
             model=model_config.model,
@@ -180,19 +209,202 @@ def _build_exploration_config(run_config) -> ExplorationConfig | None:
     )
 
 
+def _run_orcarouter_login(args) -> None:
+    """Credential management for the OrcaRouter Cyber Inference provider."""
+    import getpass
+
+    from image_red_teaming.clients.orcarouter import (
+        ORCAROUTER_API_KEY_ENV,
+        PkceKeySource,
+        resolve_api_base,
+        resolve_auth_base,
+        stored_credentials_mode,
+    )
+
+    env_key = os.getenv(ORCAROUTER_API_KEY_ENV)
+    pkce = PkceKeySource()
+
+    if args.status:
+        # Read the same record inference does (origin-bound, any storage method).
+        stored = _stored_or_browser_source()
+        mode, path = stored_credentials_mode()
+        print(f"OrcaRouter provider: {OrcaRouterCyberClient.display_name}")
+        print(f"Inference base: {resolve_api_base()}")
+        print(f"Auth base:      {resolve_auth_base()}")
+        if env_key:
+            print(f"API key:        set via {ORCAROUTER_API_KEY_ENV} (takes precedence)")
+        elif stored is not None:
+            state = "needs re-authentication" if stored.needs_reauth else "usable"
+            print(f"Connected key:  {stored.masked()} account={stored.account} generation={stored.generation} ({state})")
+            print(f"Stored at:      {path}")
+        else:
+            print("No OrcaRouter credential configured. Use --api-key or connect with your account.")
+        return
+
+    if args.logout:
+        pkce.clear()
+        print("Removed the stored OrcaRouter credential. Export of ORCAROUTER_API_KEY is unaffected.")
+        return
+
+    if args.api_key:
+        from image_red_teaming.clients.orcarouter import _looks_like_key, _secure_write, _credentials_path
+
+        key = getpass.getpass("Paste your OrcaRouter API key (input hidden): ").strip()
+        if not _looks_like_key(key):
+            raise SystemExit("That does not look like an OrcaRouter key (expected prefix 'sk-orca-').")
+        _secure_write(
+            _credentials_path(),
+            {"method": "api_key", "key": key, "scope": "api", "api_base": pkce.api_base, "needs_reauth": False},
+        )
+        print("Stored the OrcaRouter API key with 0600 permissions. Set it as ORCAROUTER_API_KEY too if you prefer env config.")
+        return
+
+    if env_key and not args.force:
+        print(f"{ORCAROUTER_API_KEY_ENV} is already set; it takes precedence. Use --force to connect an account anyway.")
+        return
+    credential = pkce.acquire(force_new=True)
+    print(f"Connected to OrcaRouter as account {credential.account} (scope {credential.scope}).")
+    print("The key is stored locally and reused on every launch until you revoke it at")
+    print("https://www.orcarouter.ai/console/authorized-apps .")
+
+
+def _run_orcarouter_models() -> None:
+    from image_red_teaming.clients.orcarouter import EnvApiKeySource, PkceKeySource, get_stored_credential, resolve_api_base
+    from image_red_teaming.clients.orcarouter_catalog import (
+        CAPABILITY_TEXT,
+        CAPABILITY_VLM,
+        OrcaRouterModelCatalog,
+    )
+
+    api_base = resolve_api_base()
+    # Reuse a stored login when the env var is absent; only start browser login otherwise.
+    credential = (
+        EnvApiKeySource(api_base=api_base).acquire()
+        if os.getenv("ORCAROUTER_API_KEY")
+        else get_stored_credential(api_base) or PkceKeySource(api_base=api_base).acquire()
+    )
+    catalog = OrcaRouterModelCatalog(api_base, api_key=credential.key).fetch(force=True)
+    print(f"Catalog source: {catalog.source} ({len(catalog.models)} models)" + (f" - {catalog.detail}" if catalog.detail else ""))
+    for capability, title in (
+        (CAPABILITY_TEXT, "text (attacker LLM roles)"),
+        (CAPABILITY_VLM, "vlm (judge, accepts image input)"),
+    ):
+        ids = [m.id for m in catalog.for_capability(capability)]
+        print(f"\n{title}: {len(ids)}")
+        for model_id in ids:
+            print(f"  {model_id}")
+
+
+def _run_orcarouter_validate(path: Path) -> None:
+    """Fail loudly when a config references a model the catalog no longer offers."""
+    from image_red_teaming.clients import orcarouter as orca
+    from image_red_teaming.clients.orcarouter_catalog import (
+        CAPABILITY_TEXT,
+        CAPABILITY_VLM,
+        OrcaRouterModelCatalog,
+        stale_model_warning,
+    )
+
+    run_config = _load_run_config(path)
+    fields = ("strategy_model", "prompt_model", "scenario_model", "example_model", "judge_model")
+    problems = []
+    checked = 0
+    for field_name in fields:
+        configs = getattr(run_config, field_name, None)
+        if not configs:
+            continue
+        for cfg in configs if isinstance(configs, list) else [configs]:
+            if cfg.client != "orcarouter":
+                continue
+            checked += 1
+            env_name = cfg.api_key_env
+            if not env_name or env_name == "OPENROUTER_API_KEY":
+                # ModelConfig's default env name belongs to OpenRouter; never read it here.
+                env_name = orca.ORCAROUTER_API_KEY_ENV
+            api_base = cfg.base_url or orca.resolve_api_base()
+            credential = orca.EnvApiKeySource(env_name, api_base=api_base).acquire()
+            catalog = OrcaRouterModelCatalog(api_base, api_key=credential.key).fetch()
+            capability = cfg.capability or (CAPABILITY_VLM if field_name == "judge_model" else CAPABILITY_TEXT)
+            warning = stale_model_warning(catalog, capability, cfg.model)
+            status = "ok" if warning is None else "MISSING"
+            print(f"{field_name}: {cfg.model} [{capability}] {status}")
+            if warning:
+                problems.append(f"{field_name}: {warning}")
+    if checked == 0:
+        print("No OrcaRouter client blocks in this config.")
+        return
+    if problems:
+        raise SystemExit("\n".join(problems))
+
+
 def cli():
     load_dotenv()
     parser = argparse.ArgumentParser(description="RISE")
-    parser.add_argument("--config", default="configs/run.example.yaml")
+    parser.add_argument("--config", default=None)
+    # Remember a value given before the subcommand: argparse would otherwise let
+    # the subparser's own default overwrite it.
+    pre_config = None
+    pre_argv = sys.argv[1:]
+    if "--config" in pre_argv:
+        position = pre_argv.index("--config")
+        if position + 1 < len(pre_argv):
+            pre_config = pre_argv[position + 1]
+    elif any(item.startswith("--config=") for item in pre_argv):
+        pre_config = next(item.split("=", 1)[1] for item in pre_argv if item.startswith("--config="))
 
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("generate-examples")
     sub.add_parser("optimize-strategies")
     sub.add_parser("run-from-config")
+    login = sub.add_parser(
+        "orcarouter-login",
+        help="Connect RISE with an OrcaRouter account (OAuth 2.0 + PKCE) or store an API key.",
+    )
+    login.add_argument(
+        "--force",
+        action="store_true",
+        help="Authorize again even if a stored key exists (e.g. after a 401).",
+    )
+    login.add_argument(
+        "--api-key",
+        action="store_true",
+        help="Prompt for an sk-orca-... key instead of opening a browser.",
+    )
+    login.add_argument(
+        "--status",
+        action="store_true",
+        help="Show which OrcaRouter credential RISE would use, without changing it.",
+    )
+    login.add_argument(
+        "--logout",
+        action="store_true",
+        help="Remove the stored OrcaRouter credential.",
+    )
+    sub.add_parser(
+        "orcarouter-models",
+        help="List OrcaRouter models available for each RISE entry point.",
+    )
+    judge_group = sub.add_parser(
+        "orcarouter-validate",
+        help="Check every OrcaRouter model in a config against the live catalog.",
+    )
+    judge_group.add_argument("--config", default=argparse.SUPPRESS)
 
     args = parser.parse_args()
+    if not hasattr(args, "config"):
+        args.config = pre_config or DEFAULT_CONFIG_PATH
 
-    run_config = load_run_config(Path(args.config))
+    if args.command == "orcarouter-login":
+        _run_orcarouter_login(args)
+        return
+    if args.command == "orcarouter-models":
+        _run_orcarouter_models()
+        return
+    if args.command == "orcarouter-validate":
+        _run_orcarouter_validate(Path(args.config))
+        return
+
+    run_config = _load_run_config(Path(args.config))
 
     # Save config to run directory for reproducibility
     run_dir = Path(run_config.logging.run_dir)
@@ -286,6 +498,7 @@ def cli():
             llm=judge_llm,
             model_config=run_config.judge_model,
             judge_template=templates.judge,
+            capability=_judge_capability(run_config.judge_model),
         )
         output_dir = run_config.logging.run_dir / "images"
         t2i = build_t2i(run_config.t2i_provider, output_dir=output_dir)
@@ -385,6 +598,7 @@ def cli():
                 llm=judge_llm,
                 model_config=run_config.judge_model,
                 judge_template=templates.judge,
+                capability=_judge_capability(run_config.judge_model),
             )
             output_dir = run_config.logging.run_dir / "images"
             t2i = build_t2i(run_config.t2i_provider, output_dir=output_dir)
@@ -488,6 +702,7 @@ def cli():
                 llm=judge_llm,
                 model_config=run_config.judge_model,
                 judge_template=templates.judge,
+                capability=_judge_capability(run_config.judge_model),
             )
             output_dir = run_config.logging.run_dir / "images"
             t2i = build_t2i(run_config.t2i_provider, output_dir=output_dir)
