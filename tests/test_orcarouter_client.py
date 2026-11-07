@@ -11,6 +11,7 @@ import urllib.request
 
 import httpx
 import pytest
+import tenacity
 
 from image_red_teaming.clients import orcarouter as orca
 from image_red_teaming.clients.orcarouter_catalog import (
@@ -612,14 +613,6 @@ def test_default_model_config_env_is_not_openrouter(monkeypatch):
             super().__init__(env_name, **kwargs)
 
     monkeypatch.setattr(orca, "EnvApiKeySource", Recorder)
-    for name in (
-        "_CATALOG_SEED",
-        "seed_catalog",
-        "_fetch_models",
-        "_request_models",
-        "fetch_catalog",
-    ):
-        pass
     # Stub discovery so this credential-routing test never issues a /models request.
     monkeypatch.setattr(
         "image_red_teaming.clients.orcarouter_catalog.OrcaRouterModelCatalog.fetch",
@@ -710,6 +703,98 @@ def test_generate_does_not_retry_a_dead_credential(monkeypatch):
     with pytest.raises(orca.OrcaReauthRequired):
         client.generate([{"role": "user", "content": "hi", "name": None}])
     assert len(calls) == 1
+
+
+def test_generate_keeps_retrying_transient_failures(monkeypatch):
+    calls = []
+    client = orca.OrcaRouterCyberClient.__new__(orca.OrcaRouterCyberClient)
+
+    def complete(messages, **kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("transient upstream error")
+        return {"content": "ok", "usage": {}, "model": "m"}
+
+    client.complete = complete
+    monkeypatch.setattr("tenacity.nap.sleep", lambda seconds: None)
+    parsed, result = client.generate([{"role": "user", "content": "hi", "name": None}])
+    assert len(calls) == 3
+    assert result["content"] == "ok" and parsed is None
+
+
+def test_unwrapped_generate_stops_at_first_401():
+    calls = []
+    client = orca.OrcaRouterCyberClient.__new__(orca.OrcaRouterCyberClient)
+
+    def complete(messages, **kwargs):
+        calls.append(1)
+        raise orca.OrcaReauthRequired("401")
+
+    client.complete = complete
+    # The inherited wrapper has no knowledge of terminal auth errors; our copy must.
+    clone = orca._replace_retry_policy(
+        orca.LLMClient.generate.__wrapped__,
+        retry=tenacity.retry_if_not_exception_type(orca.OrcaReauthRequired),
+    )
+    assert clone.__code__ is orca.LLMClient.generate.__wrapped__.__code__
+    with pytest.raises(orca.OrcaReauthRequired):
+        clone(client, [{"role": "user", "content": "hi", "name": None}])
+    assert len(calls) == 1
+    # And the outer policy recognises the 401 even when the inner one reports RetryError.
+    with pytest.raises(orca.OrcaReauthRequired):
+        client.generate([{"role": "user", "content": "hi", "name": None}])
+    assert len(calls) == 2
+
+
+def test_stored_api_key_login_is_reused_by_inference_and_models_listing(monkeypatch):
+    # `orcarouter-login --api-key` stores a key; without exporting it, every reader
+    # (inference, status, listing) must find it instead of demanding the env var.
+    _write_store()
+    monkeypatch.delenv("ORCAROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "image_red_teaming.clients.orcarouter_catalog.OrcaRouterModelCatalog.fetch",
+        lambda self, force=False: ModelCatalog(models=tuple(parse_catalog_payload(CATALOG_BODY)), source="live"),
+    )
+    assert orca.get_stored_credential("https://api.orcarouter.ai/v1").key == FAKE_KEY
+    cfg = ModelConfig(model="orcarouter/auto", client="orcarouter")
+    assert orca.build_orcarouter_client(cfg).credential.key == FAKE_KEY
+
+    import main as rise_main
+    from image_red_teaming.clients import orcarouter_catalog
+
+    listed = []
+
+    def fetch(self, force=False):
+        listed.append(self.api_key)
+        return ModelCatalog(models=(), source="live")
+
+    monkeypatch.setattr(orcarouter_catalog.OrcaRouterModelCatalog, "fetch", fetch)
+    rise_main._run_orcarouter_models()
+    assert listed == [FAKE_KEY]
+
+
+def test_api_key_login_status_and_listing_see_the_saved_key(monkeypatch, capsys):
+    # `orcarouter-login --api-key` writes a record an inference-only reader ignored.
+    _write_store()
+    monkeypatch.delenv("ORCAROUTER_API_KEY", raising=False)
+    import main as rise_main
+    from image_red_teaming.clients import orcarouter_catalog
+
+    monkeypatch.setattr(
+        orcarouter_catalog.OrcaRouterModelCatalog,
+        "fetch",
+        lambda self, force=False: ModelCatalog(models=(), source="live"),
+    )
+    argv = __import__("sys").argv
+    __import__("sys").argv = ["main.py", "orcarouter-login", "--status"]
+    try:
+        rise_main.cli()
+    finally:
+        __import__("sys").argv = argv
+    out = capsys.readouterr().out
+    assert "Connected key:" in out and "usable" in out
+    assert "No OrcaRouter credential" not in out
+    assert orca.get_stored_credential("https://api.selfhosted.example/v1") is None
 
 
 def test_cancel_during_exchange_wakes_login_and_stores_nothing():

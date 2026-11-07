@@ -41,6 +41,16 @@ def _load_run_config(path):
     return config_loader.load_run_config(path)
 
 
+def _stored_or_browser_source():
+    """Existing stored login where it applies, else a source that starts browser login."""
+    from image_red_teaming.clients import orcarouter as orca
+
+    credential = orca.get_stored_credential(orca.resolve_api_base())
+    if credential is None:
+        credential = orca.PkceKeySource().acquire()
+    return credential
+
+
 def _judge_capability(model_config):
     """The judge sends images, so OrcaRouter judges must be VLM-capable models."""
     return "vlm" if getattr(model_config, "client", None) == "orcarouter" else None
@@ -215,7 +225,8 @@ def _run_orcarouter_login(args) -> None:
     pkce = PkceKeySource()
 
     if args.status:
-        stored = pkce.load_stored()
+        # Read the same record inference does (origin-bound, any storage method).
+        stored = _stored_or_browser_source()
         mode, path = stored_credentials_mode()
         print(f"OrcaRouter provider: {OrcaRouterCyberClient.display_name}")
         print(f"Inference base: {resolve_api_base()}")
@@ -258,7 +269,7 @@ def _run_orcarouter_login(args) -> None:
 
 
 def _run_orcarouter_models() -> None:
-    from image_red_teaming.clients.orcarouter import EnvApiKeySource, PkceKeySource, resolve_api_base
+    from image_red_teaming.clients.orcarouter import EnvApiKeySource, PkceKeySource, get_stored_credential, resolve_api_base
     from image_red_teaming.clients.orcarouter_catalog import (
         CAPABILITY_TEXT,
         CAPABILITY_VLM,
@@ -266,10 +277,11 @@ def _run_orcarouter_models() -> None:
     )
 
     api_base = resolve_api_base()
+    # Reuse a stored login when the env var is absent; only start browser login otherwise.
     credential = (
         EnvApiKeySource(api_base=api_base).acquire()
         if os.getenv("ORCAROUTER_API_KEY")
-        else PkceKeySource(api_base=api_base).acquire()
+        else get_stored_credential(api_base) or PkceKeySource(api_base=api_base).acquire()
     )
     catalog = OrcaRouterModelCatalog(api_base, api_key=credential.key).fetch(force=True)
     print(f"Catalog source: {catalog.source} ({len(catalog.models)} models)" + (f" - {catalog.detail}" if catalog.detail else ""))

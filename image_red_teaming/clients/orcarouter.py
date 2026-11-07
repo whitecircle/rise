@@ -31,6 +31,7 @@ import os
 import re
 import threading
 import time
+import types
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -189,6 +190,26 @@ def _read_credentials() -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
+def get_stored_credential(api_base: Optional[str] = None) -> Optional[OrcaCredential]:
+    """
+    The stored login usable for ``api_base``, or ``None`` when there is none.
+
+    Shared by inference, ``orcarouter-models`` and ``orcarouter-validate`` so a
+    key saved by ``orcarouter-login --api-key`` (or a browser login) is picked up
+    without exporting it; a key minted for another API origin is never returned.
+    """
+    data = _read_credentials() or {}
+    if data.get("method") != PkceKeySource.method:
+        return None
+    if api_base is not None and data.get("api_base") != api_base:
+        return None
+    return PkceKeySource(
+        auth_base=data.get("auth_base") or None,
+        api_base=data.get("api_base") or api_base or resolve_api_base(),
+        open_browser=False,
+    ).load_stored()
+
+
 def _looks_like_key(value: str) -> bool:
     return bool(value) and value.startswith(KEY_PREFIX)
 
@@ -242,12 +263,7 @@ class EnvApiKeySource(CredentialSource):
         data = _read_credentials() or {}
         if not self._stored_key_usable(data, self.api_base):
             return None
-        store = PkceKeySource(
-            auth_base=data.get("auth_base") or None,
-            api_base=data.get("api_base") or self.api_base or resolve_api_base(),
-            open_browser=False,
-        )
-        return store.load_stored()
+        return get_stored_credential(data.get("api_base") or self.api_base)
 
     @staticmethod
     def _stored_key_usable(stored: Dict[str, Any], api_base: Optional[str] = None) -> bool:
@@ -787,40 +803,35 @@ def _is_auth_error(exc: Exception) -> bool:
     return status == 401
 
 
-_REAUTH_SEEN = threading.local()
-
-
 def _auth_cause(exc: Optional[BaseException]) -> Optional[BaseException]:
-    """Return the OrcaReauthRequired hidden inside tenacity RetryError wrappers, if any."""
+    """Return the ``OrcaReauthRequired`` that ended a retried call, if any."""
     seen = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
         if isinstance(exc, OrcaReauthRequired):
             return exc
         if type(exc).__name__ == "RetryError":
+            # Only the last attempt decides: earlier failures are not re-raised.
             outcome = getattr(exc, "last_attempt", None)
             inner = getattr(outcome, "result", None)
-            inner = inner() if callable(inner) else outcome
-            if isinstance(inner, BaseException):
-                exc = inner
-                continue
-            exc = None
+            inner = inner() if callable(inner) else None
+            exc = inner if isinstance(inner, BaseException) else None
             continue
         exc = exc.__cause__ or exc.__context__
     return None
 
 
-def _attempt_hit_auth_error(state: Any) -> bool:
-    """True once this call saw a terminal 401; ``complete`` sets _REAUTH_SEEN."""
-    outcome = getattr(state, "outcome", None)
-    exc = outcome.exception() if outcome is not None else None
-    if _auth_cause(exc) is not None:
-        return True
-    return bool(getattr(_REAUTH_SEEN, "value", False))
-
-
-def _is_terminal_auth(exc: Optional[BaseException]) -> bool:
-    return _auth_cause(exc) is not None
+def _replace_retry_policy(fn: Callable[..., Any], **policy: Any) -> Callable[..., Any]:
+    """Copy a function carrying tenacity's wrapper attributes, overriding its retry policy."""
+    clone = types.FunctionType(
+        fn.__code__, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__
+    )
+    clone.__kwdefaults__ = dict(fn.__kwdefaults__ or {})
+    clone.__qualname__ = fn.__qualname__
+    clone.__doc__ = fn.__doc__
+    clone.__dict__.update(fn.__dict__)
+    clone.__dict__.update(policy)
+    return clone
 
 
 class OrcaRouterCyberClient(LLMClient):
@@ -906,26 +917,30 @@ class OrcaRouterCyberClient(LLMClient):
 
     def generate(self, messages: List[ChatMessage], *args: Any, **kwargs: Any) -> Any:
         """``LLMClient.generate`` with a retry policy that never retries a dead credential."""
-        from tenacity import Retrying, stop_after_attempt, wait_exponential
+        from tenacity import Retrying, retry_if_exception, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
+        target = super().generate
+        # The base method is itself retry-wrapped (and has no idea a 401 is
+        # terminal).  Drive that same logic through policies that stop at once:
+        # otherwise a revoked key would be re-sampled three times inside it.
+        wrapped = getattr(target, "__wrapped__", None)
+        if wrapped is not None:
+            target = wrapped
+            target = _replace_retry_policy(
+                target,
+                retry=retry_if_not_exception_type(OrcaReauthRequired),
+            )
+        # The RetryError from a non-auth failure still names its cause, so a 401 is
+        # never retried by this outer policy either.
         policy = Retrying(
             reraise=True,
             stop=stop_after_attempt(3),
             wait=wait_exponential(multiplier=1, min=1, max=8),
-            # A 401 is terminal: never re-sample a revoked credential.  Inspect the
-            # attempt itself because the inner retry wrapper may report RetryError.
-            retry=lambda state: not _attempt_hit_auth_error(state),
+            retry=retry_if_exception(lambda exc: _auth_cause(exc) is None),
         )
-        _REAUTH_SEEN.value = False
-        target = super().generate
-        # The base method is itself retry-wrapped; escape that wrapper too so a
-        # 401 cannot be re-sampled inside it.
-        wrapped = getattr(target, "__wrapped__", None)
-        if wrapped is not None:
-            target = wrapped
         try:
             return policy(target, self, messages, *args, **kwargs)
-        except BaseException as exc:  # noqa: BLE001 - unwrap the outer retry wrapper
+        except BaseException as exc:  # noqa: BLE001 - unwrap the retry wrapper
             cause = _auth_cause(exc)
             if cause is not None and cause is not exc:
                 raise cause from None
@@ -944,7 +959,6 @@ class OrcaRouterCyberClient(LLMClient):
         except Exception as exc:  # noqa: BLE001 - re-raised after classification
             if _is_auth_error(exc):
                 # Terminal: never re-sample a revoked credential.
-                _REAUTH_SEEN.value = True
                 self.handle_auth_failure()
                 raise OrcaReauthRequired(
                     "OrcaRouter rejected the credential (HTTP 401); re-authenticate instead of retrying."
