@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,7 +15,6 @@ from image_red_teaming.config_loader import (
     load_categories,
     load_criteria,
     load_meta_prompts,
-    load_run_config,
     load_technique_library,
 )
 from image_red_teaming.example_generation import generate_examples
@@ -29,6 +29,21 @@ from image_red_teaming.providers.flux2_local import Flux2LocalProvider
 from image_red_teaming.exploration import ExplorationConfig, PERTURBATION_METHODS
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_CONFIG_PATH = "configs/_qwen_e0e_gptimg2_nudity.yaml"
+
+
+def _load_run_config(path):
+    """``config_loader.load_run_config``, looked up at call time so it stays patchable."""
+    from image_red_teaming import config_loader
+
+    return config_loader.load_run_config(path)
+
+
+def _judge_capability(model_config):
+    """The judge sends images, so OrcaRouter judges must be VLM-capable models."""
+    return "vlm" if getattr(model_config, "client", None) == "orcarouter" else None
 
 
 def build_llm(model_config, headers=None):
@@ -250,8 +265,13 @@ def _run_orcarouter_models() -> None:
         OrcaRouterModelCatalog,
     )
 
-    credential = EnvApiKeySource().acquire() if os.getenv("ORCAROUTER_API_KEY") else PkceKeySource().acquire()
-    catalog = OrcaRouterModelCatalog(resolve_api_base(), api_key=credential.key).fetch(force=True)
+    api_base = resolve_api_base()
+    credential = (
+        EnvApiKeySource(api_base=api_base).acquire()
+        if os.getenv("ORCAROUTER_API_KEY")
+        else PkceKeySource(api_base=api_base).acquire()
+    )
+    catalog = OrcaRouterModelCatalog(api_base, api_key=credential.key).fetch(force=True)
     print(f"Catalog source: {catalog.source} ({len(catalog.models)} models)" + (f" - {catalog.detail}" if catalog.detail else ""))
     for capability, title in (
         (CAPABILITY_TEXT, "text (attacker LLM roles)"),
@@ -273,7 +293,7 @@ def _run_orcarouter_validate(path: Path) -> None:
         stale_model_warning,
     )
 
-    run_config = load_run_config(path)
+    run_config = _load_run_config(path)
     fields = ("strategy_model", "prompt_model", "scenario_model", "example_model", "judge_model")
     problems = []
     checked = 0
@@ -285,8 +305,13 @@ def _run_orcarouter_validate(path: Path) -> None:
             if cfg.client != "orcarouter":
                 continue
             checked += 1
-            credential = orca.EnvApiKeySource(cfg.api_key_env or "ORCAROUTER_API_KEY").acquire()
-            catalog = OrcaRouterModelCatalog(cfg.base_url or orca.resolve_api_base(), api_key=credential.key).fetch()
+            env_name = cfg.api_key_env
+            if not env_name or env_name == "OPENROUTER_API_KEY":
+                # ModelConfig's default env name belongs to OpenRouter; never read it here.
+                env_name = orca.ORCAROUTER_API_KEY_ENV
+            api_base = cfg.base_url or orca.resolve_api_base()
+            credential = orca.EnvApiKeySource(env_name, api_base=api_base).acquire()
+            catalog = OrcaRouterModelCatalog(api_base, api_key=credential.key).fetch()
             capability = cfg.capability or (CAPABILITY_VLM if field_name == "judge_model" else CAPABILITY_TEXT)
             warning = stale_model_warning(catalog, capability, cfg.model)
             status = "ok" if warning is None else "MISSING"
@@ -303,7 +328,17 @@ def _run_orcarouter_validate(path: Path) -> None:
 def cli():
     load_dotenv()
     parser = argparse.ArgumentParser(description="RISE")
-    parser.add_argument("--config", default="configs/run.example.yaml")
+    parser.add_argument("--config", default=None)
+    # Remember a value given before the subcommand: argparse would otherwise let
+    # the subparser's own default overwrite it.
+    pre_config = None
+    pre_argv = sys.argv[1:]
+    if "--config" in pre_argv:
+        position = pre_argv.index("--config")
+        if position + 1 < len(pre_argv):
+            pre_config = pre_argv[position + 1]
+    elif any(item.startswith("--config=") for item in pre_argv):
+        pre_config = next(item.split("=", 1)[1] for item in pre_argv if item.startswith("--config="))
 
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("generate-examples")
@@ -341,9 +376,11 @@ def cli():
         "orcarouter-validate",
         help="Check every OrcaRouter model in a config against the live catalog.",
     )
-    judge_group.add_argument("--config", default="configs/run.example.yaml")
+    judge_group.add_argument("--config", default=argparse.SUPPRESS)
 
     args = parser.parse_args()
+    if not hasattr(args, "config"):
+        args.config = pre_config or DEFAULT_CONFIG_PATH
 
     if args.command == "orcarouter-login":
         _run_orcarouter_login(args)
@@ -355,7 +392,7 @@ def cli():
         _run_orcarouter_validate(Path(args.config))
         return
 
-    run_config = load_run_config(Path(args.config))
+    run_config = _load_run_config(Path(args.config))
 
     # Save config to run directory for reproducibility
     run_dir = Path(run_config.logging.run_dir)
@@ -449,7 +486,7 @@ def cli():
             llm=judge_llm,
             model_config=run_config.judge_model,
             judge_template=templates.judge,
-            capability="vlm" if run_config.judge_model.client == "orcarouter" else None,
+            capability=_judge_capability(run_config.judge_model),
         )
         output_dir = run_config.logging.run_dir / "images"
         t2i = build_t2i(run_config.t2i_provider, output_dir=output_dir)
@@ -549,6 +586,7 @@ def cli():
                 llm=judge_llm,
                 model_config=run_config.judge_model,
                 judge_template=templates.judge,
+                capability=_judge_capability(run_config.judge_model),
             )
             output_dir = run_config.logging.run_dir / "images"
             t2i = build_t2i(run_config.t2i_provider, output_dir=output_dir)
@@ -652,6 +690,7 @@ def cli():
                 llm=judge_llm,
                 model_config=run_config.judge_model,
                 judge_template=templates.judge,
+                capability=_judge_capability(run_config.judge_model),
             )
             output_dir = run_config.logging.run_dir / "images"
             t2i = build_t2i(run_config.t2i_provider, output_dir=output_dir)

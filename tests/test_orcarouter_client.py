@@ -484,7 +484,7 @@ def test_revoked_stored_key_marks_exact_generation_without_refresh(monkeypatch):
         base_url="https://api.orcarouter.ai/v1",
         http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=CATALOG_BODY))),
     )
-    client.client = OpenAI(
+    client._sdk = OpenAI(
         api_key=FAKE_KEY, base_url="https://api.orcarouter.ai/v1", max_retries=0,
         http_client=httpx.Client(transport=httpx.MockTransport(transport)),
     )
@@ -562,7 +562,7 @@ def test_client_complete_returns_openai_shape(monkeypatch):
         capability=CAPABILITY_TEXT,
         http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=CATALOG_BODY))),
     )
-    client.client = OpenAI(
+    client._sdk = OpenAI(
         api_key=FAKE_KEY, base_url="https://api.orcarouter.ai/v1", max_retries=0,
         http_client=httpx.Client(transport=httpx.MockTransport(transport)),
     )
@@ -607,12 +607,25 @@ def test_default_model_config_env_is_not_openrouter(monkeypatch):
     real = orca.EnvApiKeySource
 
     class Recorder(real):
-        def __init__(self, env_name=ORCAROUTER_API_KEY_ENV):
+        def __init__(self, env_name=ORCAROUTER_API_KEY_ENV, **kwargs):
             resolved["env_name"] = env_name
-            super().__init__(env_name)
+            super().__init__(env_name, **kwargs)
 
     monkeypatch.setattr(orca, "EnvApiKeySource", Recorder)
-    client = orca.build_orcarouter_client(cfg)  # catalog falls back to the seed offline
+    for name in (
+        "_CATALOG_SEED",
+        "seed_catalog",
+        "_fetch_models",
+        "_request_models",
+        "fetch_catalog",
+    ):
+        pass
+    # Stub discovery so this credential-routing test never issues a /models request.
+    monkeypatch.setattr(
+        "image_red_teaming.clients.orcarouter_catalog.OrcaRouterModelCatalog.fetch",
+        lambda self, force=False: ModelCatalog(models=tuple(parse_catalog_payload(CATALOG_BODY)), source="live"),
+    )
+    client = orca.build_orcarouter_client(cfg)
     assert resolved["env_name"] == ORCAROUTER_API_KEY_ENV
     assert client.credential.key == FAKE_KEY
     assert client.model == "orcarouter/auto"
@@ -639,3 +652,199 @@ class _Capture:
 
     def flush(self):
         pass
+
+
+# ------------------------------------------------------- review regressions ---
+
+
+def test_stored_login_is_bound_to_its_api_origin():
+    _write_store(api_base="https://api.orcarouter.ai/v1")
+    other = orca.EnvApiKeySource(api_base="https://api.selfhosted.example/v1")
+    with pytest.raises(orca.OrcaCredentialError, match="ORCAROUTER_API_KEY"):
+        other.acquire()
+    same = orca.EnvApiKeySource(api_base="https://api.orcarouter.ai/v1").acquire()
+    assert same.key == FAKE_KEY and same.account == "pkce:default"
+
+
+def test_env_key_does_not_borrow_another_origins_account(monkeypatch):
+    _write_store(account="user:12345", generation=4, api_base="https://api.selfhosted.example/v1")
+    monkeypatch.setenv("ORCAROUTER_API_KEY", FAKE_KEY)
+    cred = orca.EnvApiKeySource(api_base="https://api.orcarouter.ai/v1").acquire()
+    assert cred.source == "api_key" and cred.generation == 1
+    assert cred.account != "user:12345"
+
+
+def test_plain_http_non_loopback_base_is_rejected(monkeypatch):
+    monkeypatch.setenv("ORCAROUTER_API_KEY", FAKE_KEY)
+    with pytest.raises(orca.OrcaCredentialError, match="HTTPS"):
+        orca.OrcaRouterCyberClient(
+            model="orcarouter/auto",
+            base_url="http://api.example.invalid/v1",
+            http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=CATALOG_BODY))),
+        )
+
+
+def test_generate_does_not_retry_a_dead_credential(monkeypatch):
+    calls = []
+
+    def transport(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json=CATALOG_BODY)
+        calls.append(str(request.url))
+        return httpx.Response(401, json={"error": {"message": "revoked"}})
+
+    monkeypatch.setenv("ORCAROUTER_API_KEY", FAKE_KEY)
+    client = orca.OrcaRouterCyberClient(
+        model="text/plain-chat",
+        base_url="https://api.orcarouter.ai/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=CATALOG_BODY))),
+    )
+    from openai import OpenAI
+
+    client._sdk = OpenAI(
+        api_key=FAKE_KEY,
+        base_url="https://api.orcarouter.ai/v1",
+        max_retries=0,
+        http_client=httpx.Client(transport=httpx.MockTransport(transport)),
+    )
+    with pytest.raises(orca.OrcaReauthRequired):
+        client.generate([{"role": "user", "content": "hi", "name": None}])
+    assert len(calls) == 1
+
+
+def test_cancel_during_exchange_wakes_login_and_stores_nothing():
+    _write_store(generation=7)
+    fake = FakeAuthServer()
+
+    def deliver(listener, url):
+        state = httpx.URL(url).params["state"]
+        params = {"code": fake.code, "state": state}
+        urllib.request.urlopen(listener.callback_url + "?" + urllib.parse.urlencode(params), timeout=5).read()
+        return listener.wait_for_code(state, timeout=5)
+
+    def slowed(request):
+        if request.url.path == "/api/v1/auth/keys":
+            assert orca.cancel_pkce_attempt() is True  # cancellation lands mid-flight
+        return httpx.Response(200, json={"key": FAKE_KEY, "scope": "api"})
+
+    source = orca.PkceKeySource(auth_base="https://www.orcarouter.ai", api_base="https://api.orcarouter.ai/v1")
+    source._callback_delivery = deliver
+    source._http = httpx.Client(transport=httpx.MockTransport(slowed))
+    with pytest.raises(orca.OrcaCredentialError, match="cancelled"):
+        source.connect()
+    stored = json.loads(_store_text())
+    assert stored["generation"] == 7 and stored["needs_reauth"] is False
+
+
+def test_cancel_while_waiting_returns_promptly():
+    import threading
+    import time as _time
+
+    source = orca.PkceKeySource(auth_base="https://www.orcarouter.ai", timeout_seconds=30.0)
+    source._on_authorize_url = lambda url: None
+    box = {}
+
+    def run():
+        try:
+            source.connect()
+        except orca.OrcaCredentialError as exc:
+            box["error"] = exc
+
+    threading.Thread(target=run, daemon=True).start()
+    deadline = _time.time() + 5
+    while not orca._ACTIVE_ATTEMPTS and _time.time() < deadline:
+        _time.sleep(0.01)
+    attempt_id = max(orca._ACTIVE_ATTEMPTS)
+    started = _time.time()
+    assert orca.cancel_pkce_attempt(attempt_id) is True
+    while "error" not in box and _time.time() < started + 5:
+        _time.sleep(0.01)
+    assert _time.time() - started < 5
+    assert "cancelled" in str(box.get("error"))
+
+
+def test_failed_login_releases_the_attempt():
+    source = orca.PkceKeySource(auth_base="https://www.orcarouter.ai")
+
+    def deliver(listener, url):
+        params = {"error": "access_denied", "state": httpx.URL(url).params["state"]}
+        urllib.request.urlopen(listener.callback_url + "?" + urllib.parse.urlencode(params), timeout=5).read()
+        return listener.wait_for_code(httpx.URL(url).params["state"], timeout=5)
+
+    source._callback_delivery = deliver
+    source._http = FakeAuthServer().client()
+    with pytest.raises(orca.OrcaCredentialError, match="access_denied"):
+        source.connect()
+    assert orca._ACTIVE_ATTEMPTS == {}
+    assert not orca._credentials_path().exists()
+
+
+def test_load_run_config_tags_model_roles(tmp_path):
+    import image_red_teaming.config_loader as config_loader
+
+    cfg_path = tmp_path / "run.yaml"
+    cfg_path.write_text(
+        "t2i_provider: fal\n"
+        "seed_strategy:\n"
+        "  name: seed\n"
+        "  instructions: seed\n"
+        "strategy_model:\n"
+        "  model: orcarouter/auto\n"
+        "  client: orcarouter\n"
+        "judge_model:\n"
+        "  model: vision/chat-vlm\n"
+        "  client: orcarouter\n",
+        encoding="utf-8",
+    )
+    config = config_loader.load_run_config(cfg_path)
+    models = config.strategy_model
+    models = models if isinstance(models, list) else [models]
+    assert models[0].role == "strategy_model"
+    assert config.judge_model.role == "judge_model"
+
+
+def test_judge_model_without_capability_requires_vlm(monkeypatch):
+    monkeypatch.setenv("ORCAROUTER_API_KEY", FAKE_KEY)
+    model_cfg = ModelConfig(model="text/plain-chat", client="orcarouter", role="judge_model")
+
+    monkeypatch.setattr(
+        "image_red_teaming.clients.orcarouter_catalog.OrcaRouterModelCatalog.fetch",
+        lambda self, force=False: ModelCatalog(models=tuple(parse_catalog_payload(CATALOG_BODY)), source="live"),
+    )
+    with pytest.raises(RuntimeError, match="vlm"):
+        orca.build_orcarouter_client(model_cfg)
+
+
+def test_validate_subcommand_keeps_root_config():
+    import sys
+
+    import main as rise_main
+
+    captured = {}
+
+    class Cfg:
+        strategy_model = prompt_model = scenario_model = example_model = judge_model = None
+
+    def fake_load(path):
+        captured["path"] = str(path)
+        return Cfg()
+
+    original = rise_main._load_run_config
+    rise_main._load_run_config = fake_load
+    argv = sys.argv
+    sys.argv = ["main.py", "--config", "configs/custom.yaml", "orcarouter-validate"]
+    try:
+        rise_main.cli()
+    finally:
+        sys.argv = argv
+        rise_main._load_run_config = original
+    assert captured["path"] == "configs/custom.yaml"
+    # The documented position (`--config` after the subcommand) also works.
+    rise_main._load_run_config = fake_load
+    sys.argv = ["main.py", "orcarouter-validate", "--config", "configs/other.yaml"]
+    try:
+        rise_main.cli()
+    finally:
+        sys.argv = argv
+        rise_main._load_run_config = original
+    assert captured["path"] == "configs/other.yaml"

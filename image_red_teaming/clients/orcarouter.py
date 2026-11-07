@@ -23,6 +23,7 @@ refresh grant, so a ``401`` marks the credential for re-authentication.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -31,13 +32,17 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+try:  # POSIX only; Windows falls back to lock-free writes (single-process CLI)
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
+
 import httpx
 from openai import OpenAI
-from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from image_red_teaming.clients.base import ChatMessage, CompletionResult, LLMClient
 from image_red_teaming.clients.orcarouter_catalog import (
@@ -137,6 +142,28 @@ def _credentials_path() -> Path:
     return _config_dir() / CREDENTIALS_FILENAME
 
 
+@contextlib.contextmanager
+def _credentials_lock():
+    """Serialize read-modify-write cycles on the credentials file across processes."""
+    path = _credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+    fd = os.open(str(path.parent / (CREDENTIALS_FILENAME + ".lock")), os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
 def _secure_write(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -178,22 +205,17 @@ class EnvApiKeySource(CredentialSource):
 
     method = "api_key"
 
-    def __init__(self, env_name: str = ORCAROUTER_API_KEY_ENV) -> None:
+    def __init__(self, env_name: str = ORCAROUTER_API_KEY_ENV, api_base: Optional[str] = None) -> None:
         self.env_name = env_name
+        self.api_base = api_base.rstrip("/") if api_base else None
         self._credential: Optional[OrcaCredential] = None
 
     def acquire(self) -> OrcaCredential:
-        stored = _read_credentials() or {}
         value = (os.getenv(self.env_name) or "").strip()
+        stored_cred = self._stored_fallback()
         if not value:
-            if self._stored_key_usable(stored):
-                return OrcaCredential(
-                    key=stored["key"],
-                    source=PkceKeySource.method,
-                    generation=int(stored.get("generation") or 1),
-                    account=stored.get("account"),
-                    scope=stored.get("scope"),
-                )
+            if stored_cred is not None and not stored_cred.needs_reauth:
+                return stored_cred
             raise_orca_missing_key(self.env_name)
         if not _looks_like_key(value):
             logger.warning(
@@ -203,18 +225,36 @@ class EnvApiKeySource(CredentialSource):
                 KEY_PREFIX,
             )
         # Keep .env precedence: the environment always wins over a stored login.
+        # A stored record that is bound to this endpoint still carries the account
+        # and generation the exported key belongs to.
+        same_endpoint = stored_cred is not None and stored_cred.key == value
         self._credential = OrcaCredential(
             key=value,
             source=self.method,
-            generation=int(stored.get("generation") or 1),
-            account=stored.get("account") or f"env:{self.env_name}",
-            scope=stored.get("scope") or "api",
+            generation=stored_cred.generation if same_endpoint else 1,
+            account=(stored_cred.account if same_endpoint else None) or f"env:{self.env_name}",
+            scope=(stored_cred.scope if same_endpoint else None) or "api",
         )
         return self._credential
 
+    def _stored_fallback(self) -> Optional[OrcaCredential]:
+        """A connected account's stored key, but only when bound to this API origin."""
+        data = _read_credentials() or {}
+        if not self._stored_key_usable(data, self.api_base):
+            return None
+        store = PkceKeySource(
+            auth_base=data.get("auth_base") or None,
+            api_base=data.get("api_base") or self.api_base or resolve_api_base(),
+            open_browser=False,
+        )
+        return store.load_stored()
+
     @staticmethod
-    def _stored_key_usable(stored: Dict[str, Any]) -> bool:
+    def _stored_key_usable(stored: Dict[str, Any], api_base: Optional[str] = None) -> bool:
         """A connected account's key is a fallback when the env var is absent."""
+        if api_base is not None and stored.get("api_base") != api_base:
+            # Never send a key minted for one API origin to a different endpoint.
+            return False
         return (
             stored.get("method") == PkceKeySource.method
             and isinstance(stored.get("key"), str)
@@ -291,34 +331,26 @@ class PkceKeySource(CredentialSource):
         )
 
     def connect(self) -> OrcaCredential:
-        previous = _read_credentials() or {}
         attempt = begin_pkce_attempt(self.auth_base, self.app_name, self.timeout_seconds)
         try:
-            self._on_authorize_url(attempt.authorize_url)
-            code = self._wait_for_code(attempt)
-            credential = exchange_code(
-                self.auth_base, code, attempt, http_client=self._http,
-            )
+            try:
+                self._on_authorize_url(attempt.authorize_url)
+                code = self._wait_for_code(attempt)
+                credential = exchange_code(
+                    self.auth_base, code, attempt, http_client=self._http,
+                )
+                if credential is not None:
+                    # Store atomically with the cancellation check; a cancelled
+                    # attempt raises here and never writes.
+                    commit_login(attempt, credential, self.api_base, self.auth_base)
+                    return credential
+            except BaseException:
+                if not attempt.finished:
+                    _abandon_attempt(attempt)
+                raise
         finally:
             attempt.listener.close()
-        generation = int(previous.get("generation") or 0) + 1
-        credential.generation = generation
-        # Persist only after a successful exchange; the old secret stays until then.
-        _secure_write(
-            _credentials_path(),
-            {
-                "method": self.method,
-                "key": credential.key,
-                "account": credential.account,
-                "scope": credential.scope,
-                "api_base": self.api_base,
-                "auth_base": self.auth_base,
-                "generation": generation,
-                "needs_reauth": False,
-                "created_at": int(time.time()),
-            },
-        )
-        return credential
+        raise OrcaCredentialError("OrcaRouter authorization was cancelled.")
 
     def clear(self) -> None:
         path = _credentials_path()
@@ -468,6 +500,7 @@ class _LoopbackListener:
 
         self._event = _threading.Event()
         self._query: Optional[Dict[str, str]] = None
+        self._closed = False
         listener = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -477,6 +510,11 @@ class _LoopbackListener:
                 parsed = urlparse(self.path)
                 if parsed.path != "/cb":
                     self.send_response(404)
+                    self.end_headers()
+                    return
+                if listener._closed:
+                    # A cancelled login never processes a late callback.
+                    self.send_response(410)
                     self.end_headers()
                     return
                 listener._query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
@@ -492,6 +530,7 @@ class _LoopbackListener:
                 return
 
         self._server = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
         self.port = self._server.server_address[1]
         self._thread = _threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -503,6 +542,12 @@ class _LoopbackListener:
     def wait_for_code(self, expected_state: str, timeout: float = 300.0) -> str:
         if not self._event.wait(timeout):
             raise OrcaCredentialError("OrcaRouter authorization timed out; run the login again.")
+        return self._deliver(expected_state)
+
+    def _deliver(self, expected_state: str) -> str:
+        if self._closed:
+            # Woken by cancellation, not by a callback: report it as such.
+            raise OrcaCredentialError("OrcaRouter authorization was cancelled.")
         query = self._query or {}
         if not states_match(expected_state, query.get("state")):
             raise OrcaCredentialError("OrcaRouter callback state mismatch; authorization rejected.")
@@ -514,6 +559,9 @@ class _LoopbackListener:
         return code
 
     def close(self) -> None:
+        # Wake the waiting caller (as cancellation) before tearing the listener down.
+        self._closed = True
+        self._event.set()
         try:
             self._server.shutdown()
         finally:
@@ -530,15 +578,19 @@ class PkceAttempt:
     timeout: float
     attempt_id: int = 0
     cancelled: bool = False
+    lock: Any = field(default_factory=threading.Lock)
+    finished: bool = False
 
     def cancel(self) -> None:
-        self.cancelled = True
+        # Publish cancellation under the attempt lock so a concurrent commit can see it.
+        with self.lock:
+            self.cancelled = True
         self.listener.close()
 
 
 _ACTIVE_ATTEMPTS: Dict[int, PkceAttempt] = {}
 _ATTEMPT_COUNTER = [0]
-_CURRENT_ATTEMPT = [0]
+_LOCAL_CURRENT = threading.local()
 
 
 def begin_pkce_attempt(auth_base: str, app_name: str, timeout: float = 300.0) -> PkceAttempt:
@@ -560,14 +612,15 @@ def begin_pkce_attempt(auth_base: str, app_name: str, timeout: float = 300.0) ->
             attempt_id=_ATTEMPT_COUNTER[0],
         )
         _ACTIVE_ATTEMPTS[attempt.attempt_id] = attempt
-        _CURRENT_ATTEMPT[0] = attempt.attempt_id
+        # Thread-local: a background login cannot hijack another thread's cancel.
+        _LOCAL_CURRENT.value = attempt.attempt_id
     return attempt
 
 
 def cancel_pkce_attempt(attempt_id: Optional[int] = None) -> bool:
     """Release the login lock: cancel the current (or a given) attempt."""
     with _PKCE_ATTEMPT_LOCK:
-        target = attempt_id if attempt_id is not None else _CURRENT_ATTEMPT[0]
+        target = getattr(_LOCAL_CURRENT, "value", 0) if attempt_id is None else attempt_id
         attempt = _ACTIVE_ATTEMPTS.pop(target, None)
         if attempt is None:
             return False
@@ -576,12 +629,65 @@ def cancel_pkce_attempt(attempt_id: Optional[int] = None) -> bool:
 
 
 def active_pkce_attempt_id() -> int:
-    return _CURRENT_ATTEMPT[0]
+    return getattr(_LOCAL_CURRENT, "value", 0)
 
 
 def _finish_attempt(attempt: PkceAttempt) -> None:
     with _PKCE_ATTEMPT_LOCK:
         _ACTIVE_ATTEMPTS.pop(attempt.attempt_id, None)
+
+
+def _abandon_attempt(attempt: PkceAttempt) -> None:
+    """Unregister an attempt and release its verifier and listener (failed login)."""
+    _finish_attempt(attempt)
+    attempt.lock = None  # drop the verifier's owner
+    try:
+        attempt.listener.close()
+    except Exception:  # noqa: BLE001 - cleanup must never mask the real error
+        logger.debug("Ignoring listener cleanup failure", exc_info=True)
+
+
+def commit_login(
+    attempt: PkceAttempt,
+    credential: OrcaCredential,
+    api_base: str,
+    auth_base: str,
+) -> bool:
+    """
+    Persist a completed login atomically with cancellation and generation checks.
+
+    The generation bump, the cancellation check and the write all happen under
+    the same interprocess credentials lock, so a cancelled attempt can never
+    commit and a 401 handler can never overwrite a newer login's key.  Returns
+    Raises ``OrcaCredentialError`` (and stores nothing) when the attempt was
+    cancelled before the commit.
+    """
+    if attempt.lock is None:
+        raise OrcaCredentialError("OrcaRouter authorization was cancelled.")
+    with attempt.lock:
+        if attempt.cancelled:
+            raise OrcaCredentialError("OrcaRouter authorization was cancelled.")
+        with _credentials_lock():
+            previous = _read_credentials() or {}
+            generation = int(previous.get("generation") or 0) + 1
+            credential.generation = generation
+            # Persist only after a successful exchange; the old secret stays until then.
+            _secure_write(
+                _credentials_path(),
+                {
+                    "method": PkceKeySource.method,
+                    "key": credential.key,
+                    "account": credential.account,
+                    "scope": credential.scope,
+                    "api_base": api_base,
+                    "auth_base": auth_base,
+                    "generation": generation,
+                    "needs_reauth": False,
+                    "created_at": int(time.time()),
+                },
+            )
+        attempt.finished = True
+    return True
 
 
 def exchange_code(
@@ -590,7 +696,12 @@ def exchange_code(
     attempt: PkceAttempt,
     http_client: Optional[httpx.Client] = None,
 ) -> OrcaCredential:
-    """Redeem an auth code.  Auth origin only; never raises with secrets in text."""
+    """
+    Redeem an auth code.  Auth origin only; never raises with secrets in text.
+
+    Raises ``OrcaCredentialError`` when the attempt was cancelled while the
+    request was in flight, so a cancelled login never reports success.
+    """
     if attempt.cancelled:
         raise OrcaCredentialError("OrcaRouter authorization was cancelled.")
     url = f"{auth_base.rstrip('/')}{EXCHANGE_PATH}"
@@ -608,6 +719,8 @@ def exchange_code(
         _finish_attempt(attempt)
         if http_client is None:
             client.close()
+    if attempt.cancelled:
+        raise OrcaCredentialError("OrcaRouter authorization was cancelled.")
     if resp.status_code == 429:
         raise OrcaCredentialError(
             "OrcaRouter rate-limited the sign-in (429). You already hold a stored key; "
@@ -648,16 +761,20 @@ def mark_needs_reauth(generation: Optional[int], account: Optional[str] = None) 
     a newer login (different generation or account) has already replaced the
     credential, so a stale failure cannot poison a fresh one.
     """
-    data = _read_credentials()
-    if not data:
-        return False
-    current = int(data.get("generation") or 1)
-    if generation is not None and generation != current:
-        return False
-    if account is not None and data.get("account") and data.get("account") != account:
-        return False
-    data["needs_reauth"] = True
-    _secure_write(_credentials_path(), data)
+    with _credentials_lock():
+        data = _read_credentials()
+        if not data:
+            return False
+        if data.get("method") != PkceKeySource.method and account is not None:
+            # An env-provided key is never marked: only stored logins can go stale.
+            return False
+        current = int(data.get("generation") or 1)
+        if generation is not None and generation != current:
+            return False
+        if account is not None and data.get("account") and data.get("account") != account:
+            return False
+        data["needs_reauth"] = True
+        _secure_write(_credentials_path(), data)
     return True
 
 
@@ -668,6 +785,42 @@ def mark_needs_reauth(generation: Optional[int], account: Optional[str] = None) 
 def _is_auth_error(exc: Exception) -> bool:
     status = getattr(exc, "status_code", None)
     return status == 401
+
+
+_REAUTH_SEEN = threading.local()
+
+
+def _auth_cause(exc: Optional[BaseException]) -> Optional[BaseException]:
+    """Return the OrcaReauthRequired hidden inside tenacity RetryError wrappers, if any."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, OrcaReauthRequired):
+            return exc
+        if type(exc).__name__ == "RetryError":
+            outcome = getattr(exc, "last_attempt", None)
+            inner = getattr(outcome, "result", None)
+            inner = inner() if callable(inner) else outcome
+            if isinstance(inner, BaseException):
+                exc = inner
+                continue
+            exc = None
+            continue
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
+def _attempt_hit_auth_error(state: Any) -> bool:
+    """True once this call saw a terminal 401; ``complete`` sets _REAUTH_SEEN."""
+    outcome = getattr(state, "outcome", None)
+    exc = outcome.exception() if outcome is not None else None
+    if _auth_cause(exc) is not None:
+        return True
+    return bool(getattr(_REAUTH_SEEN, "value", False))
+
+
+def _is_terminal_auth(exc: Optional[BaseException]) -> bool:
+    return _auth_cause(exc) is not None
 
 
 class OrcaRouterCyberClient(LLMClient):
@@ -703,10 +856,12 @@ class OrcaRouterCyberClient(LLMClient):
 
         self.config = config
         self.capability = capability or CAPABILITY_TEXT
-        self.api_base = (base_url or resolve_api_base()).rstrip("/")
+        # The provider pins a validated origin: config/env overrides are checked
+        # by the origin policy so a bearer key is never sent over plain HTTP.
+        self.api_base = _enforce_origin(base_url or resolve_api_base(), "OrcaRouter base_url")
         self._credential = credential
         self._credential_source = credential_source
-        source = credential_source or EnvApiKeySource()
+        source = credential_source or EnvApiKeySource(api_base=self.api_base)
         self._credential = credential or source.acquire()
 
         catalog = OrcaRouterModelCatalog(self.api_base, api_key=self._credential.key, http_client=http_client)
@@ -727,7 +882,7 @@ class OrcaRouterCyberClient(LLMClient):
             raise RuntimeError(f"OrcaRouter provider: {resolved.warning}")
         self.model = resolved.model_id
         default_headers = dict(default_headers or {})
-        self.client = OpenAI(
+        self._sdk = OpenAI(
             api_key=self._credential.key,
             base_url=self.api_base,
             default_headers=default_headers or None,
@@ -749,17 +904,38 @@ class OrcaRouterCyberClient(LLMClient):
             OrcaRouterCyberClient.display_name,
         )
 
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=8),
-        retry=retry_if_not_exception_type(OrcaReauthRequired),
-    )
+    def generate(self, messages: List[ChatMessage], *args: Any, **kwargs: Any) -> Any:
+        """``LLMClient.generate`` with a retry policy that never retries a dead credential."""
+        from tenacity import Retrying, stop_after_attempt, wait_exponential
+
+        policy = Retrying(
+            reraise=True,
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=1, max=8),
+            # A 401 is terminal: never re-sample a revoked credential.  Inspect the
+            # attempt itself because the inner retry wrapper may report RetryError.
+            retry=lambda state: not _attempt_hit_auth_error(state),
+        )
+        _REAUTH_SEEN.value = False
+        target = super().generate
+        # The base method is itself retry-wrapped; escape that wrapper too so a
+        # 401 cannot be re-sampled inside it.
+        wrapped = getattr(target, "__wrapped__", None)
+        if wrapped is not None:
+            target = wrapped
+        try:
+            return policy(target, self, messages, *args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 - unwrap the outer retry wrapper
+            cause = _auth_cause(exc)
+            if cause is not None and cause is not exc:
+                raise cause from None
+            raise
+
     def complete(self, messages: List[ChatMessage], **kwargs: Any) -> CompletionResult:
         messages = [{"role": x["role"], "content": x["content"]} for x in messages]
         extra_body = getattr(self, "extra_body", None) or {}
         try:
-            response = self.client.chat.completions.create(
+            response = self._sdk.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 extra_body=extra_body if extra_body else None,
@@ -768,6 +944,7 @@ class OrcaRouterCyberClient(LLMClient):
         except Exception as exc:  # noqa: BLE001 - re-raised after classification
             if _is_auth_error(exc):
                 # Terminal: never re-sample a revoked credential.
+                _REAUTH_SEEN.value = True
                 self.handle_auth_failure()
                 raise OrcaReauthRequired(
                     "OrcaRouter rejected the credential (HTTP 401); re-authenticate instead of retrying."
@@ -795,11 +972,20 @@ class OrcaRouterCyberClient(LLMClient):
         )
 
 
+def _config_role(config: Any) -> Optional[str]:
+    """Return the RunConfig field name this ModelConfig was loaded into, if known."""
+    return getattr(config, "role", None)
+
+
 def build_orcarouter_client(config: Any, headers: Optional[Dict[str, str]] = None) -> OrcaRouterCyberClient:
     """Build the client for a ``client: orcarouter`` ModelConfig."""
     from image_red_teaming.clients.orcarouter_catalog import CAPABILITY_TEXT, CAPABILITY_VLM
 
-    capability = getattr(config, "capability", None) or CAPABILITY_TEXT
+    capability = getattr(config, "capability", None)
+    if capability is None and _config_role(config) == "judge_model":
+        # The judge consumes generated images: never accept a text-only model.
+        capability = CAPABILITY_VLM
+    capability = capability or CAPABILITY_TEXT
     if capability not in (CAPABILITY_TEXT, CAPABILITY_VLM):
         raise ValueError(f"Unsupported OrcaRouter capability: {capability!r}")
     env_name = getattr(config, "api_key_env", None)
@@ -809,7 +995,7 @@ def build_orcarouter_client(config: Any, headers: Optional[Dict[str, str]] = Non
     return OrcaRouterCyberClient(
         model=config.model,
         config=config,
-        credential_source=EnvApiKeySource(env_name),
+        credential_source=EnvApiKeySource(env_name, api_base=config.base_url or resolve_api_base()),
         base_url=config.base_url or resolve_api_base(),
         capability=capability,
         model_override=getattr(config, "model_override", None),

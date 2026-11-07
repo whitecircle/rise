@@ -278,11 +278,21 @@ class OrcaRouterModelCatalog:
             headers["Authorization"] = f"Bearer {self.api_key}"
         client = self._http or httpx.Client(timeout=CATALOG_TIMEOUT_SECONDS, trust_env=False)
         try:
-            resp = client.get(f"{self.api_base}/models", headers=headers)
-            resp.raise_for_status()
-            body = resp.content
-            if len(body) > MAX_CATALOG_BYTES:
-                raise ValueError("model catalog response too large")
+            # Stream the body so the size limit is enforced while (decompressed)
+            # content is still arriving, never after buffering all of it.
+            with client.stream("GET", f"{self.api_base}/models", headers=headers) as resp:
+                resp.raise_for_status()
+                declared = resp.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > MAX_CATALOG_BYTES:
+                    raise ValueError("model catalog response too large")
+                chunks = []
+                total = 0
+                for chunk in resp.iter_bytes():
+                    total += len(chunk)
+                    if total > MAX_CATALOG_BYTES:
+                        raise ValueError("model catalog response too large")
+                    chunks.append(chunk)
+                body = b"".join(chunks)
             payload = json.loads(body)
             models = parse_catalog_payload(payload)
             if not models:

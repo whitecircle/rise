@@ -37,8 +37,9 @@ def test_live_catalog_filters_text_and_vlm():
     assert "orcarouter/auto" in text_ids or "orcarouter/fusion" in text_ids
     assert not text_ids & {"jina-reranker-v2", "jina/jina-rerank-v3"}
     assert vlm_ids <= text_ids
-    if LIVE_MODEL in text_ids:
-        assert any("image" in m.input_modalities for m in catalog.models if m.id in vlm_ids)
+    # Every model the filter calls a VLM must declare image input; an endpoint
+    # without any VLM is fine as long as the filter itself stays correct.
+    assert all("image" in m.input_modalities for m in catalog.models if m.id in vlm_ids)
 
 
 def test_live_chat_completion_through_provider():
